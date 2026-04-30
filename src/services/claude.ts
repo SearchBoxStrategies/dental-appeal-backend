@@ -89,7 +89,7 @@ Generate the complete letter, ready to print and send. Include:
         {
           type: 'text',
           text: DENTAL_SYSTEM_PROMPT,
-          // @ts-expect-error -- prompt caching beta field
+          // @ts-ignore -- prompt caching beta field
           cache_control: { type: 'ephemeral' },
         },
       ],
