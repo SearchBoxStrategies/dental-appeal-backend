@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../db';
-import { authenticate } from '../middleware/auth';
 
 const router = Router();
 
@@ -15,6 +14,7 @@ const registerSchema = z.object({
 });
 
 router.post('/register', async (req, res) => {
+  console.log('Register endpoint hit'); // Debug log
   try {
     const { practiceName, name, email, password } = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(password, 10);
@@ -24,12 +24,12 @@ router.post('/register', async (req, res) => {
       await client.query('BEGIN');
 
       // Check if practice already exists
+      let practiceId;
       const { rows: existingPractice } = await client.query(
         'SELECT id FROM practices WHERE email = $1',
         [email]
       );
       
-      let practiceId;
       if (existingPractice.length > 0) {
         practiceId = existingPractice[0].id;
       } else {
@@ -78,16 +78,11 @@ router.post('/register', async (req, res) => {
       client.release();
     }
   } catch (error) {
+    console.error('Registration error:', error);
     if (error instanceof z.ZodError) {
       res.status(400).json({ error: error.errors });
       return;
     }
-    const err = error as any;
-    if (err.code === '23505') {
-      res.status(409).json({ error: 'Email already registered' });
-      return;
-    }
-    console.error(error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -98,6 +93,7 @@ const loginSchema = z.object({
 });
 
 router.post('/login', async (req, res) => {
+  console.log('Login endpoint hit');
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -141,24 +137,33 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
+    console.error('Login error:', error);
     if (error instanceof z.ZodError) {
       res.status(400).json({ error: error.errors });
       return;
     }
-    console.error(error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.get('/me', authenticate, async (req, res) => {
+router.get('/me', async (req, res) => {
   try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      res.status(401).json({ error: 'No token provided' });
+      return;
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+
     const { rows: [user] } = await db.query(
       `SELECT u.id, u.email, u.name, u.role, 
               p.id as practice_id, p.name as practice_name, p.subscription_status 
        FROM users u 
        JOIN practices p ON u.practice_id = p.id 
        WHERE u.id = $1`,
-      [req.user!.userId]
+      [decoded.userId]
     );
 
     if (!user) {
