@@ -10,6 +10,7 @@ import webhookRouter from './routes/webhook';
 import cdtCodesRouter from './routes/cdtCodes';
 
 const app = express();
+console.log('✅ Backend starting up...');
 const PORT = process.env.PORT ?? 3001;
 
 app.use(cors({ origin: true, credentials: true }));
