@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-
+import adminRouter from './routes/admin';
 import authRouter from './routes/auth';
 import claimsRouter from './routes/claims';
 import appealsRouter from './routes/appeals';
@@ -58,7 +58,7 @@ routers.forEach(({ path, router, name }) => {
     });
   }
 });
-
+app.use('/api/admin', adminRouter);
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
