@@ -129,4 +129,58 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
+// Get all subscriptions with analytics (for admin only)
+router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
+  try {
+    // Get all practices with subscription data
+    const { rows: subscriptions } = await db.query(`
+      SELECT 
+        u.id,
+        u.name,
+        u.email,
+        p.name as practice_name,
+        p.subscription_status,
+        p.stripe_customer_id,
+        CASE 
+          WHEN p.subscription_status = 'active' THEN 199
+          ELSE 0
+        END as amount,
+        NOW() as current_period_start,
+        NOW() + INTERVAL '30 days' as current_period_end,
+        COALESCE(p.total_paid, 0) as total_paid,
+        p.last_payment_date,
+        p.last_payment_amount
+      FROM users u
+      LEFT JOIN practices p ON u.practice_id = p.id
+      WHERE u.is_admin = FALSE
+      ORDER BY u.created_at DESC
+    `);
+
+    // Calculate stats
+    const activeSubs = subscriptions.filter((s: any) => s.subscription_status === 'active');
+    const totalActive = activeSubs.length;
+    const mrr = activeSubs.reduce((sum: number, s: any) => sum + (s.amount || 0), 0);
+    const arr = mrr * 12;
+    const averageRevenuePerUser = totalActive > 0 ? mrr / totalActive : 0;
+    const totalInactive = subscriptions.filter((s: any) => s.subscription_status === 'inactive' || s.subscription_status === 'cancelled').length;
+    const totalTrialing = subscriptions.filter((s: any) => s.subscription_status === 'trialing').length;
+
+    res.json({
+      subscriptions,
+      stats: {
+        total_active: totalActive,
+        total_inactive: totalInactive,
+        total_trialing: totalTrialing,
+        monthly_recurring_revenue: mrr,
+        annual_recurring_revenue: arr,
+        average_revenue_per_user: averageRevenuePerUser,
+        churn_rate: 0
+      }
+    });
+  } catch (error) {
+    console.error('Admin subscriptions error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
