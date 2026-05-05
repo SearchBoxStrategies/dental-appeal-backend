@@ -14,7 +14,7 @@ const registerSchema = z.object({
 });
 
 router.post('/register', async (req, res) => {
-  console.log('Register endpoint hit'); // Debug log
+  console.log('Register endpoint hit');
   try {
     const { practiceName, name, email, password } = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(password, 10);
@@ -23,7 +23,6 @@ router.post('/register', async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // Check if practice already exists
       let practiceId;
       const { rows: existingPractice } = await client.query(
         'SELECT id FROM practices WHERE email = $1',
@@ -40,11 +39,12 @@ router.post('/register', async (req, res) => {
         practiceId = practice.id;
       }
 
+      // Add is_admin column with default FALSE (new users are NOT admins)
       const { rows: [user] } = await client.query(
-        `INSERT INTO users (practice_id, email, password_hash, name, role)
-         VALUES ($1, $2, $3, $4, 'admin') 
+        `INSERT INTO users (practice_id, email, password_hash, name, role, is_admin)
+         VALUES ($1, $2, $3, $4, 'admin', FALSE) 
          ON CONFLICT (practice_id, email) DO UPDATE SET name = $4, password_hash = $3
-         RETURNING id, email, name, role`,
+         RETURNING id, email, name, role, is_admin`,
         [practiceId, email, passwordHash, name]
       );
 
@@ -68,7 +68,13 @@ router.post('/register', async (req, res) => {
 
       res.status(201).json({
         token,
-        user: { id: user.id, email: user.email, name: user.name, role: user.role },
+        user: { 
+          id: user.id, 
+          email: user.email, 
+          name: user.name, 
+          role: user.role,
+          is_admin: user.is_admin 
+        },
         practice: { id: practice.id, name: practice.name, subscriptionStatus: practice.subscription_status },
       });
     } catch (err) {
@@ -129,7 +135,13 @@ router.post('/login', async (req, res) => {
 
     res.json({
       token,
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        name: user.name, 
+        role: user.role,
+        is_admin: user.is_admin 
+      },
       practice: {
         id: user.practice_id,
         name: user.practice_name,
@@ -158,7 +170,7 @@ router.get('/me', async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
 
     const { rows: [user] } = await db.query(
-      `SELECT u.id, u.email, u.name, u.role, 
+      `SELECT u.id, u.email, u.name, u.role, u.is_admin,
               p.id as practice_id, p.name as practice_name, p.subscription_status 
        FROM users u 
        JOIN practices p ON u.practice_id = p.id 
@@ -172,7 +184,13 @@ router.get('/me', async (req, res) => {
     }
 
     res.json({
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        name: user.name, 
+        role: user.role,
+        is_admin: user.is_admin 
+      },
       practice: {
         id: user.practice_id,
         name: user.practice_name,
