@@ -20,13 +20,15 @@ app.use('/api/webhook', express.raw({ type: 'application/json' }), webhookRouter
 
 app.use(express.json());
 
+// Register all API routes
 app.use('/api/auth', authRouter);
 app.use('/api/claims', claimsRouter);
 app.use('/api/appeals', appealsRouter);
 app.use('/api/billing', billingRouter);
+app.use('/api/cdt-codes', cdtCodesRouter);
+app.use('/api/admin', adminRouter);  // Admin routes - moved up for proper registration
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
-app.use('/api/cdt-codes', cdtCodesRouter);
 
 // Debug: List all registered routes
 console.log('\n📋 Registered Routes:');
@@ -38,13 +40,14 @@ app._router.stack.forEach((r: any) => {
   }
 });
 
-// Log auth router routes (and other routers)
+// Log all router routes for debugging
 const routers = [
   { path: '/api/auth', router: authRouter, name: 'Auth' },
   { path: '/api/claims', router: claimsRouter, name: 'Claims' },
   { path: '/api/appeals', router: appealsRouter, name: 'Appeals' },
   { path: '/api/billing', router: billingRouter, name: 'Billing' },
-  { path: '/api/cdt-codes', router: cdtCodesRouter, name: 'CDTCodes' }
+  { path: '/api/cdt-codes', router: cdtCodesRouter, name: 'CDTCodes' },
+  { path: '/api/admin', router: adminRouter, name: 'Admin' }  // Added admin router to debug list
 ];
 
 routers.forEach(({ path, router, name }) => {
@@ -58,7 +61,7 @@ routers.forEach(({ path, router, name }) => {
     });
   }
 });
-app.use('/api/admin', adminRouter);
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
