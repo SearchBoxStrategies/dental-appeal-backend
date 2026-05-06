@@ -31,18 +31,42 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
       console.log(`✅ Checkout completed for session: ${session.id}`);
       console.log(`   UserId: ${session.metadata?.userId}`);
       console.log(`   PracticeId: ${session.metadata?.practiceId}`);
+      console.log(`   Customer: ${session.customer}`);
       
-      // Update your database - you can add the actual DB update here
-      // const { db } = await import('../db');
-      // await db.query(
-      //   'UPDATE practices SET subscription_status = $1 WHERE stripe_customer_id = $2',
-      //   ['active', session.customer]
-      // );
+      // Update the database - UNCOMMENTED
+      try {
+        const { db } = await import('../db');
+        await db.query(
+          `UPDATE practices 
+           SET subscription_status = 'active', 
+               stripe_customer_id = $1,
+               stripe_subscription_id = $2
+           WHERE id = $3`,
+          [session.customer, session.subscription, session.metadata?.practiceId]
+        );
+        console.log(`✅ Updated practice ${session.metadata?.practiceId} to active`);
+      } catch (dbError) {
+        console.error('❌ Database update failed:', dbError);
+      }
       break;
       
     case 'invoice.payment_succeeded':
       const invoice = event.data.object as Stripe.Invoice;
       console.log(`💰 Payment succeeded for invoice: ${invoice.id}`);
+      break;
+      
+    case 'customer.subscription.deleted':
+      const subscription = event.data.object as Stripe.Subscription;
+      console.log(`❌ Subscription cancelled: ${subscription.id}`);
+      try {
+        const { db } = await import('../db');
+        await db.query(
+          'UPDATE practices SET subscription_status = $1 WHERE stripe_subscription_id = $2',
+          ['cancelled', subscription.id]
+        );
+      } catch (dbError) {
+        console.error('❌ Database update failed:', dbError);
+      }
       break;
       
     default:
