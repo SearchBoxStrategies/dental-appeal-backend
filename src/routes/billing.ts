@@ -1,41 +1,56 @@
 import { Router } from 'express';
 import { db } from '../db';
-import { stripe } from '../services/stripe';
 import { authenticate } from '../middleware/auth';
+import { createCheckoutSession, createCustomerPortalSession } from '../services/stripe';
 
 const router = Router();
 
+// Get current subscription status
+router.get('/subscription', authenticate, async (req, res) => {
+  try {
+    const practiceId = req.user!.practiceId;
+    
+    const { rows: [practice] } = await db.query(
+      `SELECT subscription_status, stripe_customer_id, total_paid, last_payment_date 
+       FROM practices WHERE id = $1`,
+      [practiceId]
+    );
+    
+    res.json({
+      status: practice?.subscription_status || 'inactive',
+      stripeCustomerId: practice?.stripe_customer_id,
+      totalPaid: practice?.total_paid || 0,
+      lastPaymentDate: practice?.last_payment_date,
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Create checkout session for subscription
 router.post('/checkout', authenticate, async (req, res) => {
   try {
+    const practiceId = req.user!.practiceId;
+    const userId = req.user!.userId;
+    const priceId = process.env.STRIPE_PRICE_ID!;
+    
     const { rows: [practice] } = await db.query(
-      'SELECT name, email, stripe_customer_id FROM practices WHERE id = $1',
-      [req.user!.practiceId]
+      'SELECT stripe_customer_id FROM practices WHERE id = $1',
+      [practiceId]
     );
-
-    let customerId: string = practice.stripe_customer_id;
-
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: practice.email,
-        name: practice.name,
-        metadata: { practiceId: req.user!.practiceId },
-      });
-      customerId = customer.id;
-      await db.query(
-        'UPDATE practices SET stripe_customer_id = $1 WHERE id = $2',
-        [customerId, req.user!.practiceId]
-      );
-    }
-
-    const session = await stripe.checkout.sessions.create({
-      customer: customerId,
-      payment_method_types: ['card'],
-      line_items: [{ price: process.env.STRIPE_PRICE_ID!, quantity: 1 }],
-      mode: 'subscription',
-      success_url: `${process.env.CLIENT_URL}/billing?success=true`,
-      cancel_url: `${process.env.CLIENT_URL}/billing?canceled=true`,
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'https://app.dentalappeal.claims';
+    
+    const session = await createCheckoutSession({
+      customerId: practice?.stripe_customer_id,
+      priceId,
+      successUrl: `${frontendUrl}/billing?success=true`,
+      cancelUrl: `${frontendUrl}/billing?canceled=true`,
+      userId,
+      practiceId,
     });
-
+    
     res.json({ url: session.url });
   } catch (error) {
     console.error(error);
@@ -43,27 +58,31 @@ router.post('/checkout', authenticate, async (req, res) => {
   }
 });
 
+// Create customer portal session for managing subscription
 router.post('/portal', authenticate, async (req, res) => {
   try {
+    const practiceId = req.user!.practiceId;
+    
     const { rows: [practice] } = await db.query(
       'SELECT stripe_customer_id FROM practices WHERE id = $1',
-      [req.user!.practiceId]
+      [practiceId]
     );
-
-    if (!practice.stripe_customer_id) {
-      res.status(400).json({ error: 'No billing account found. Subscribe first.' });
-      return;
+    
+    if (!practice?.stripe_customer_id) {
+      return res.status(400).json({ error: 'No Stripe customer found' });
     }
-
-    const session = await stripe.billingPortal.sessions.create({
-      customer: practice.stripe_customer_id,
-      return_url: `${process.env.CLIENT_URL}/billing`,
-    });
-
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'https://app.dentalappeal.claims';
+    
+    const session = await createCustomerPortalSession(
+      practice.stripe_customer_id,
+      `${frontendUrl}/billing`
+    );
+    
     res.json({ url: session.url });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: 'Failed to open billing portal' });
+    res.status(500).json({ error: 'Failed to create portal session' });
   }
 });
 
