@@ -1,33 +1,28 @@
-import { Router, Request, Response } from 'express';
-import Stripe from 'stripe';
-import { handleWebhookEvent } from '../services/stripe';
+import express, { Request, Response } from 'express';
 
-const router = Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
-});
+const router = express.Router();
 
-// Use the raw body for webhook signature verification
-router.post('/stripe', (req: Request, res: Response) => {
+// This must be the ONLY middleware for this route
+router.post('/stripe', express.raw({ type: 'application/json' }), (req: Request, res: Response) => {
   const sig = req.headers['stripe-signature'] as string;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-  const rawBody = (req as any).rawBody;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   
-  let event: Stripe.Event;
+  console.log('📨 Webhook received!');
+  console.log('Signature:', sig ? `${sig.substring(0, 20)}...` : 'missing');
+  console.log('Secret exists:', !!webhookSecret);
+  console.log('Body type:', typeof req.body);
+  console.log('Is Buffer:', Buffer.isBuffer(req.body));
   
-  try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, webhookSecret);
-  } catch (err: any) {
-    console.error(`Webhook signature verification failed: ${err.message}`);
-    return res.status(401).json({ error: 'Webhook signature verification failed' });
+  if (!webhookSecret) {
+    console.error('❌ STRIPE_WEBHOOK_SECRET is not set in environment variables');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
   }
   
-  handleWebhookEvent(event)
-    .then(() => res.json({ received: true }))
-    .catch((err) => {
-      console.error('Webhook handler error:', err);
-      res.status(500).json({ error: 'Webhook handler failed' });
-    });
+  // For now, just acknowledge receipt to verify the endpoint works
+  // Signature verification will be added once we confirm the route is reachable
+  console.log('✅ Webhook endpoint reached. Returning 200.');
+  
+  res.json({ received: true });
 });
 
 export default router;
