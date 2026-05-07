@@ -1,12 +1,12 @@
 import nodemailer from 'nodemailer';
 
-// Configure email transporter
+// Configure email transporter for Hostinger (Titan Email)
 const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
+  host: "smtp.titan.email",
+  port: 465,
+  secure: true,
   auth: {
-    user: process.env.SMTP_USER,
+    user: "support@dentalappeal.claims",
     pass: process.env.SMTP_PASS,
   },
 });
@@ -21,7 +21,7 @@ export interface EmailOptions {
 export const sendEmail = async (options: EmailOptions) => {
   try {
     await transporter.sendMail({
-      from: `"DentalAppeal" <${process.env.SMTP_FROM || 'noreply@dentalappeal.claims'}>`,
+      from: `"DentalAppeal Support" <support@dentalappeal.claims>`,
       to: options.to,
       subject: options.subject,
       html: options.html,
