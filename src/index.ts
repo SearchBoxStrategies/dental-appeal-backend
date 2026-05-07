@@ -31,6 +31,7 @@ app.use('/api/billing', billingRouter);
 app.use('/api/cdt-codes', cdtCodesRouter);
 app.use('/api/documents', documentRouter);
 app.use('/api/user', userRouter);
+app.use('/api/analytics', analyticsRouter);
 app.use('/api/admin', adminRouter);  // Admin routes - moved up for proper registration
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
