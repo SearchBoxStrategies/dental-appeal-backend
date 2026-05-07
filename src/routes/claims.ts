@@ -69,6 +69,29 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
+// ✅ NEW: Update claim status endpoint
+router.patch('/:id/status', authenticate, async (req, res) => {
+  try {
+    const claimId = req.params.id;
+    const { status } = req.body;
+    const practiceId = req.user!.practiceId;
+    
+    const { rows: [claim] } = await db.query(
+      'UPDATE claims SET status = $1 WHERE id = $2 AND practice_id = $3 RETURNING *',
+      [status, claimId, practiceId]
+    );
+    
+    if (!claim) {
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    
+    res.json(claim);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 const claimSchema = z.object({
   patientName: z.string().min(1),
   patientDob: z.string(),
