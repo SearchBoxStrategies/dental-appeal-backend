@@ -10,6 +10,7 @@ import webhookRouter from './routes/webhook';
 import cdtCodesRouter from './routes/cdtCodes';
 import documentRouter from './routes/documents';
 import userRouter from './routes/user';
+import analyticsRouter from './routes/analytics';
 
 const app = express();
 console.log('✅ Backend starting up...');
