@@ -8,6 +8,7 @@ import appealsRouter from './routes/appeals';
 import billingRouter from './routes/billing';
 import webhookRouter from './routes/webhook';
 import cdtCodesRouter from './routes/cdtCodes';
+import documentRouter from './routes/documents';
 
 const app = express();
 console.log('✅ Backend starting up...');
@@ -26,6 +27,7 @@ app.use('/api/claims', claimsRouter);
 app.use('/api/appeals', appealsRouter);
 app.use('/api/billing', billingRouter);
 app.use('/api/cdt-codes', cdtCodesRouter);
+app.use('/api/documents', documentRouter);
 app.use('/api/admin', adminRouter);  // Admin routes - moved up for proper registration
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
