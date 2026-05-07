@@ -9,6 +9,7 @@ import billingRouter from './routes/billing';
 import webhookRouter from './routes/webhook';
 import cdtCodesRouter from './routes/cdtCodes';
 import documentRouter from './routes/documents';
+import userRouter from './routes/user';
 
 const app = express();
 console.log('✅ Backend starting up...');
