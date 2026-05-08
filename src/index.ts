@@ -17,7 +17,12 @@ const app = express();
 console.log('✅ Backend starting up...');
 const PORT = process.env.PORT ?? 3001;
 
-app.use(cors({ origin: true, credentials: true }));
+app.use(cors({ 
+  origin: 'https://app.dentalappeal.claims',  // Explicit frontend URL
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Stripe webhook requires raw body — must be registered before express.json()
 app.use('/api/webhook', express.raw({ type: 'application/json' }), webhookRouter);
