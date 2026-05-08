@@ -11,6 +11,7 @@ import cdtCodesRouter from './routes/cdtCodes';
 import documentRouter from './routes/documents';
 import userRouter from './routes/user';
 import analyticsRouter from './routes/analytics';
+import bulkUploadRouter from './routes/bulkUpload';
 
 const app = express();
 console.log('✅ Backend starting up...');
@@ -33,6 +34,7 @@ app.use('/api/documents', documentRouter);
 app.use('/api/user', userRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/admin', adminRouter);  // Admin routes - moved up for proper registration
+app.use('/api/bulk', bulkUploadRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
