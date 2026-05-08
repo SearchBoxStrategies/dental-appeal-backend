@@ -17,8 +17,9 @@ const app = express();
 console.log('✅ Backend starting up...');
 const PORT = process.env.PORT ?? 3001;
 
+// Explicit CORS configuration for browser compatibility
 app.use(cors({ 
-  origin: 'https://app.dentalappeal.claims',  // Explicit frontend URL
+  origin: 'https://app.dentalappeal.claims',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -38,7 +39,7 @@ app.use('/api/cdt-codes', cdtCodesRouter);
 app.use('/api/documents', documentRouter);
 app.use('/api/user', userRouter);
 app.use('/api/analytics', analyticsRouter);
-app.use('/api/admin', adminRouter);  // Admin routes - moved up for proper registration
+app.use('/api/admin', adminRouter);
 app.use('/api/bulk', bulkUploadRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
@@ -60,7 +61,7 @@ const routers = [
   { path: '/api/appeals', router: appealsRouter, name: 'Appeals' },
   { path: '/api/billing', router: billingRouter, name: 'Billing' },
   { path: '/api/cdt-codes', router: cdtCodesRouter, name: 'CDTCodes' },
-  { path: '/api/admin', router: adminRouter, name: 'Admin' }  // Added admin router to debug list
+  { path: '/api/admin', router: adminRouter, name: 'Admin' }
 ];
 
 routers.forEach(({ path, router, name }) => {
