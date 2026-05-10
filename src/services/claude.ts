@@ -26,6 +26,7 @@ export interface PracticeProfile {
   phone: string | null;
   fax: string | null;
   website: string | null;
+  email: string | null;
   npi_number: string | null;
   tax_id: string | null;
   provider_name: string | null;
@@ -75,11 +76,8 @@ DENIAL REASON APPEAL STRATEGIES:
 export async function generateAppealLetter(
   claim: ClaimDetails,
   practice: PracticeProfile
-): Promise<{
-  letter: string;
-  model: string;
-  promptUsed: string;
-}> {
+): Promise<{ letter: string; model: string; promptUsed: string }>
+{
   const model = 'claude-sonnet-4-6';
 
   // Build practice letterhead
