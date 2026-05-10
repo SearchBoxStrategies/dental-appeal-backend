@@ -78,7 +78,11 @@ export async function generateAppealLetter(
   practice: PracticeProfile
 ): Promise<{ letter: string; model: string; promptUsed: string }>
 {
-  const model = 'claude-sonnet-4-6';
+  // SWITCHED TO HAIKU FOR FASTER GENERATION (2-3x faster than Sonnet)
+  const model = 'claude-3-5-haiku-latest';
+  
+  // REDUCED TOKEN LIMIT FOR FASTER RESPONSE
+  const maxTokens = 2048;  // Was 4096
 
   // Build practice letterhead
   const practiceAddress = [
@@ -148,11 +152,10 @@ export async function generateAppealLetter(
   const amountClaimed = claim.amountClaimed ? `$${claim.amountClaimed.toFixed(2)}` : '[AMOUNT CLAIMED]';
   const amountDenied = claim.amountDenied ? `$${claim.amountDenied.toFixed(2)}` : '[AMOUNT DENIED]';
 
-  const userPrompt = `Generate a complete, professional dental insurance appeal letter ready to send. Use the information below and fill in ALL provided fields. Only leave placeholders for truly missing information.
+  // SHORTENED PROMPT FOR FASTER PROCESSING
+  const userPrompt = `Generate a complete, professional dental insurance appeal letter ready to send.
 
-========================================
-PRACTICE INFORMATION (FOR LETTERHEAD)
-========================================
+PRACTICE INFORMATION:
 Practice Name: ${practice.name}
 ${practiceAddress ? `Address: ${practiceAddress}` : 'Address: [PRACTICE ADDRESS]'}
 ${contactLine || '[PHONE NUMBER]'}
@@ -161,50 +164,42 @@ ${practice.email ? `Email: ${practice.email}` : ''}
 Provider: ${providerInfo}
 ${credentialsLine}
 
-========================================
-CLAIM INFORMATION
-========================================
+CLAIM INFORMATION:
 Patient Name: ${claim.patientName}
 Date of Birth: ${claim.patientDob}
 Insurance Company: ${claim.insuranceCompany}
-Policy Number: ${claim.policyNumber || '[POLICY NUMBER - REQUIRED]'}
-Claim Number: ${claim.claimNumber || '[CLAIM NUMBER - REQUIRED]'}
+Policy Number: ${claim.policyNumber || '[POLICY NUMBER]'}
+Claim Number: ${claim.claimNumber || '[CLAIM NUMBER]'}
 Date of Service: ${claim.serviceDate}
 Procedure Codes:
   ${procedureList}
 Amount Claimed: ${amountClaimed}
 Amount Denied: ${amountDenied}
-Denial Reason: ${claim.denialReason || '[DENIAL REASON FROM EOB - REQUIRED]'}
+Denial Reason: ${claim.denialReason}
 
-========================================
-LETTER REQUIREMENTS
-========================================
-1. Use the practice information for the letterhead
-2. Insert TODAY'S DATE as the letter date
-3. Use the insurance company name for the recipient (add address placeholder)
-4. Include a subject line with the claim number
-5. Add a table of claim information for quick reference
-6. Address the specific denial reason with clinical justification
-7. Cite the CDT codes and their standard descriptions
-8. Include a section for supporting documentation (checklist format)
-9. Add a signature block with provider name and credentials
-10. Include a pre-send checklist at the end
-
-IMPORTANT:
-- If Policy Number, Claim Number, or Amounts are PROVIDED, use them directly
-- If missing, add a CLEAR placeholder like [POLICY NUMBER FROM EOB]
-- Use the EXACT denial reason to tailor the clinical justification
-- Make the letter ready to print and send with minimal editing
-- Do NOT add clinical findings not provided - use standard justifications
+LETTER REQUIREMENTS:
+1. Use practice information for letterhead
+2. Use today's date
+3. Include subject line with claim number
+4. Address the specific denial reason
+5. Include signature block with provider name
+6. Make it ready to send with minimal editing
 
 Generate the complete letter now.`;
 
-  const response = await client.messages.create({
-    model,
-    max_tokens: 4096,
-    system: DENTAL_SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: userPrompt }],
-  });
+  const response = await client.messages.create(
+    {
+      model,
+      max_tokens: maxTokens,
+      system: DENTAL_SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: userPrompt }],
+    },
+    {
+      headers: { 
+        'anthropic-beta': 'prompt-caching-2024-07-31',
+      },
+    }
+  );
 
   const letter = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
