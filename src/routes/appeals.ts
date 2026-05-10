@@ -6,7 +6,7 @@ import { generateAppealLetter } from '../services/claude';
 
 const router = Router();
 
-router.post('/generate/:claimId', authenticate, /* requireActiveSubscription, */ async (req, res) => {
+router.post('/generate/:claimId', authenticate, async (req, res) => {
   try {
     const { rows: [claim] } = await db.query(
       'SELECT * FROM claims WHERE id = $1 AND practice_id = $2',
@@ -23,29 +23,26 @@ router.post('/generate/:claimId', authenticate, /* requireActiveSubscription, */
       [req.user!.practiceId]
     );
 
+    // Pass ALL claim data to the AI
     const { letter, model, promptUsed } = await generateAppealLetter({
       patientName: claim.patient_name,
-      patientDob: new Date(claim.patient_dob).toISOString().split('T')[0],
+      patientDob: claim.patient_dob,
       insuranceCompany: claim.insurance_company,
       policyNumber: claim.policy_number,
       claimNumber: claim.claim_number,
       procedureCodes: claim.procedure_codes,
       denialReason: claim.denial_reason,
-      serviceDate: new Date(claim.service_date).toISOString().split('T')[0],
+      serviceDate: claim.service_date,
       amountClaimed: claim.amount_claimed ? parseFloat(claim.amount_claimed) : null,
       amountDenied: claim.amount_denied ? parseFloat(claim.amount_denied) : null,
       practiceName: practice.name,
     });
 
+    // Save to database
     const { rows: [appeal] } = await db.query(
-      `INSERT INTO appeals (practice_id, claim_id, created_by, prompt_used, letter_content, model_used)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [req.user!.practiceId, claim.id, req.user!.userId, promptUsed, letter, model]
-    );
-
-    await db.query(
-      "UPDATE claims SET status = 'appealed' WHERE id = $1",
-      [claim.id]
+      `INSERT INTO appeals (claim_id, letter_content, model_used)
+       VALUES ($1, $2, $3) RETURNING *`,
+      [claim.id, letter, model]
     );
 
     res.status(201).json(appeal);
