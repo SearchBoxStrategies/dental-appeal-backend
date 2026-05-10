@@ -79,7 +79,7 @@ export async function generateAppealLetter(
 ): Promise<{ letter: string; model: string; promptUsed: string }>
 {
   // SWITCHED TO HAIKU FOR FASTER GENERATION (2-3x faster than Sonnet)
-  const model = 'claude-3-5-haiku-latest';
+  const model = 'claude-sonnet-4-6';
   
   // REDUCED TOKEN LIMIT FOR FASTER RESPONSE
   const maxTokens = 2048;  // Was 4096
