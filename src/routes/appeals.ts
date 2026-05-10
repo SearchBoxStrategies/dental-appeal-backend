@@ -18,33 +18,29 @@ router.post('/generate/:claimId', authenticate, async (req, res) => {
       return;
     }
 
-    // Fetch practice profile with all available information
+    // Fetch practice profile
     const { rows: [practice] } = await db.query(
       `SELECT 
-         name, 
-         address, 
-         city, 
-         state, 
-         zip, 
-         phone, 
-         fax, 
-         website, 
-         email,
-         npi_number, 
-         tax_id, 
-         provider_name, 
-         provider_license
-       FROM practices 
-       WHERE id = $1`,
+         name, address, city, state, zip, phone, fax, website, email,
+         npi_number, tax_id, provider_name, provider_license
+       FROM practices WHERE id = $1`,
       [req.user!.practiceId]
     );
 
-    // Generate appeal letter with claim data and practice profile - PASS BOTH ARGUMENTS
+    // Fetch insurance company details
+    const { rows: [insuranceCompany] } = await db.query(
+      `SELECT id, name, code, appeals_address, appeals_department, timely_filing_days
+       FROM insurance_companies WHERE id = $1`,
+      [claim.insurance_company_id]
+    );
+
+    // Generate appeal letter with claim data, practice profile, and insurance info
     const { letter, model, promptUsed } = await generateAppealLetter(
       {
         patientName: claim.patient_name,
         patientDob: claim.patient_dob,
         insuranceCompany: claim.insurance_company,
+        insuranceCompanyId: claim.insurance_company_id,
         policyNumber: claim.policy_number,
         claimNumber: claim.claim_number,
         procedureCodes: claim.procedure_codes,
@@ -68,6 +64,7 @@ router.post('/generate/:claimId', authenticate, async (req, res) => {
         tax_id: practice?.tax_id,
         provider_name: practice?.provider_name,
         provider_license: practice?.provider_license,
+        insuranceCompany: insuranceCompany || null,
       }
     );
 
