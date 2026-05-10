@@ -7,6 +7,7 @@ export interface ClaimDetails {
   patientName: string;
   patientDob: string;
   insuranceCompany: string;
+  insuranceCompanyId?: number;
   policyNumber: string | null;
   claimNumber: string | null;
   procedureCodes: string[];
@@ -31,6 +32,14 @@ export interface PracticeProfile {
   tax_id: string | null;
   provider_name: string | null;
   provider_license: string | null;
+  insuranceCompany?: {
+    id: number;
+    name: string;
+    code: string;
+    appeals_address: string;
+    appeals_department: string;
+    timely_filing_days: number;
+  } | null;
 }
 
 const DENTAL_SYSTEM_PROMPT = `You are an expert dental insurance appeal specialist. Generate professional appeal letters for dental practices. Be concise but persuasive. Address the specific denial reason. Include clinical justification.`;
@@ -40,10 +49,7 @@ export async function generateAppealLetter(
   practice: PracticeProfile
 ): Promise<{ letter: string; model: string; promptUsed: string }>
 {
-  // Using Sonnet (works with your API key)
   const model = 'claude-sonnet-4-6';
-  
-  // Reduced token limit for faster generation
   const maxTokens = 2048;
 
   // Build practice letterhead
@@ -63,7 +69,16 @@ export async function generateAppealLetter(
   const licenseInfo = practice.provider_license ? `License: ${practice.provider_license}` : '';
   const credentialsLine = [npiInfo, licenseInfo].filter(Boolean).join(' | ');
 
-  // Format procedure codes with descriptions
+  // Build insurance appeal address
+  let insuranceAppealAddress = '';
+  if (practice.insuranceCompany) {
+    insuranceAppealAddress = [
+      practice.insuranceCompany.appeals_department,
+      practice.insuranceCompany.appeals_address
+    ].filter(Boolean).join('\n');
+  }
+
+  // Format procedure codes
   const procedureDescriptions: Record<string, string> = {
     D0120: 'Periodic oral evaluation',
     D0140: 'Limited oral evaluation',
@@ -113,7 +128,6 @@ export async function generateAppealLetter(
   const amountClaimed = claim.amountClaimed ? `$${claim.amountClaimed.toFixed(2)}` : 'Amount not provided';
   const amountDenied = claim.amountDenied ? `$${claim.amountDenied.toFixed(2)}` : 'Amount not provided';
 
-  // Shortened prompt for faster processing
   const userPrompt = `Generate a professional dental insurance appeal letter.
 
 PRACTICE INFORMATION:
@@ -123,10 +137,13 @@ ${contactLine}
 Provider: ${providerInfo}
 ${credentialsLine}
 
+INSURANCE COMPANY INFORMATION:
+${claim.insuranceCompany}
+${insuranceAppealAddress ? `Appeals Address:\n${insuranceAppealAddress}` : ''}
+
 CLAIM INFORMATION:
 Patient: ${claim.patientName}
 DOB: ${claim.patientDob}
-Insurance: ${claim.insuranceCompany}
 Policy: ${claim.policyNumber || 'Not provided'}
 Claim #: ${claim.claimNumber || 'Not provided'}
 Service Date: ${claim.serviceDate}
@@ -136,7 +153,15 @@ Amount Claimed: ${amountClaimed}
 Amount Denied: ${amountDenied}
 Denial Reason: ${claim.denialReason}
 
-Generate a complete appeal letter with letterhead, date, recipient, clinical justification addressing the denial reason, and signature block. Be concise but professional.`;
+Generate a complete appeal letter with:
+1. Practice letterhead using practice information
+2. Today's date
+3. Insurance company appeals address (use provided address or leave as placeholder)
+4. Subject line with claim number
+5. Clinical justification addressing the denial reason
+6. Signature block with provider name and credentials
+
+Make it professional, persuasive, and ready to send with minimal editing.`;
 
   const response = await client.messages.create({
     model,
