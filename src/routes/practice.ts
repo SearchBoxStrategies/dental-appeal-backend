@@ -10,11 +10,11 @@ router.get('/profile', authenticate, async (req, res) => {
     const practiceId = req.user!.practiceId;
     
     const { rows: [practice] } = await db.query(
-      `SELECT id, name, address, city, state, zip, phone, fax, website, 
-              logo_url, npi_number, tax_id, provider_name, provider_license, profile_completed
-       FROM practices WHERE id = $1`,
-      [practiceId]
-    );
+  `SELECT id, name, address, city, state, zip, phone, fax, website, email,
+          npi_number, tax_id, provider_name, provider_license, profile_completed
+   FROM practices WHERE id = $1`,
+  [practiceId]
+);
     
     res.json(practice || {});
   } catch (error) {
