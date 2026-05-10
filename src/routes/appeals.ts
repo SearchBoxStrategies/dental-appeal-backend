@@ -29,17 +29,17 @@ router.post('/generate/:claimId', authenticate, async (req, res) => {
          phone, 
          fax, 
          website, 
+         email,
          npi_number, 
          tax_id, 
          provider_name, 
-         provider_license,
-         email
+         provider_license
        FROM practices 
        WHERE id = $1`,
       [req.user!.practiceId]
     );
 
-    // Generate appeal letter with claim data and practice profile
+    // Generate appeal letter with claim data and practice profile - PASS BOTH ARGUMENTS
     const { letter, model, promptUsed } = await generateAppealLetter(
       {
         patientName: claim.patient_name,
@@ -63,11 +63,11 @@ router.post('/generate/:claimId', authenticate, async (req, res) => {
         phone: practice?.phone,
         fax: practice?.fax,
         website: practice?.website,
+        email: practice?.email,
         npi_number: practice?.npi_number,
         tax_id: practice?.tax_id,
         provider_name: practice?.provider_name,
         provider_license: practice?.provider_license,
-        email: practice?.email,
       }
     );
 
