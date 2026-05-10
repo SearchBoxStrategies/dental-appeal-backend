@@ -12,6 +12,7 @@ import documentRouter from './routes/documents';
 import userRouter from './routes/user';
 import analyticsRouter from './routes/analytics';
 import bulkUploadRouter from './routes/bulkUpload';
+import practiceRouter from './routes/practice';
 
 const app = express();
 console.log('✅ Backend starting up...');
@@ -41,6 +42,7 @@ app.use('/api/user', userRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/admin', adminRouter);
 app.use('/api/bulk', bulkUploadRouter);
+app.use('/api/practice', practiceRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
