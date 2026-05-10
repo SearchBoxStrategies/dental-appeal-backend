@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { db } from '../db';
 import { authenticate } from '../middleware/auth';
+import { validateClaim, getValidationSummary } from '../services/validation';
 
 const router = Router();
 
@@ -90,6 +91,30 @@ router.patch('/:id/status', authenticate, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
   }
+// Validate claim before generating appeal
+router.post('/:id/validate', authenticate, async (req, res) => {
+  try {
+    const claimId = parseInt(req.params.id);
+    
+    // Verify claim belongs to user
+    const { rows: [claim] } = await db.query(
+      'SELECT * FROM claims WHERE id = $1 AND practice_id = $2',
+      [claimId, req.user!.practiceId]
+    );
+    
+    if (!claim) {
+      return res.status(404).json({ error: 'Claim not found' });
+    }
+    
+    const validation = await validateClaim(claim, claimId);
+    const summary = await getValidationSummary(claimId);
+    
+    res.json({ validation, summary });
+  } catch (error) {
+    console.error('Validation error:', error);
+    res.status(500).json({ error: 'Failed to validate claim' });
+  }
+});
 });
 
 const claimSchema = z.object({
