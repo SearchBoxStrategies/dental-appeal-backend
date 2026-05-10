@@ -61,47 +61,53 @@ export async function generateAppealLetter(claim: ClaimDetails): Promise<{
 }> {
   const model = 'claude-sonnet-4-6';
 
-  const userPrompt = `Generate a complete insurance appeal letter for the following denied dental claim:
+  const userPrompt = `Generate a complete, professional dental insurance appeal letter using the following claim information. The letter should be ready to send with MINIMAL placeholder text.
 
-Patient Name: ${claim.patientName}
-Date of Birth: ${claim.patientDob}
-Insurance Company: ${claim.insuranceCompany}
-Policy Number: ${claim.policyNumber ?? 'N/A'}
-Claim Number: ${claim.claimNumber ?? 'N/A'}
-Date of Service: ${claim.serviceDate}
-Procedure Codes: ${claim.procedureCodes.join(', ')}
-Amount Claimed: ${claim.amountClaimed != null ? `$${claim.amountClaimed.toFixed(2)}` : 'N/A'}
-Amount Denied: ${claim.amountDenied != null ? `$${claim.amountDenied.toFixed(2)}` : 'N/A'}
-Denial Reason: ${claim.denialReason}
-Submitting Practice: ${claim.practiceName}
+CLAIM INFORMATION:
+- Patient Name: ${claim.patientName}
+- Date of Birth: ${claim.patientDob}
+- Insurance Company: ${claim.insuranceCompany}
+- Policy Number: ${claim.policyNumber || 'Not provided - USER MUST ADD'}
+- Claim Number: ${claim.claimNumber || 'Not provided - USER MUST ADD'}
+- Date of Service: ${claim.serviceDate}
+- Procedure Codes: ${claim.procedureCodes.join(', ')}
+- Amount Claimed: ${claim.amountClaimed != null ? `$${claim.amountClaimed.toFixed(2)}` : 'Not provided'}
+- Amount Denied: ${claim.amountDenied != null ? `$${claim.amountDenied.toFixed(2)}` : 'Not provided'}
+- Denial Reason: ${claim.denialReason}
+- Submitting Practice: ${claim.practiceName}
 
-Generate the complete letter, ready to print and send. Include:
-- Today's date
-- [PRACTICE ADDRESS] and [INSURANCE COMPANY ADDRESS] placeholders
-- Proper salutation, body paragraphs with clinical justification, and closing
-- Signature block with practice name`;
+CRITICAL RULES:
+1. If Policy Number, Claim Number, Amounts are PROVIDED, use them directly in the letter.
+2. If any field says "Not provided", insert a CLEAR placeholder like "[POLICY NUMBER FROM EOB]" so the user knows exactly what to fill.
+3. Use the EXACT denial reason to tailor the clinical justification.
+4. Include specific CDT code descriptions from the ADA guidelines.
+5. Generate a complete letter with proper letterhead, date, recipient address, subject line, numbered sections, and signature block.
+6. DO NOT add clinical findings that aren't in the claim data - use standard justifications for the procedure codes.
+
+The letter should include:
+- Practice header (ready for user to add address/phone)
+- Date (current date)
+- Insurance company appeals address placeholder
+- Subject line with claim number and patient name
+- A table of claim information
+- Clinical justification section specific to the procedure codes
+- Response to the specific denial reason
+- Enclosures checklist
+- Signature block with provider name placeholder
+- Pre-send checklist for the user
+
+Make the letter professional, persuasive, and as complete as possible. Use the denial reason to drive the clinical argument.`;
 
   const response = await client.messages.create(
     {
       model,
-      max_tokens: 2048,
-      system: [
-        {
-          type: 'text',
-          text: DENTAL_SYSTEM_PROMPT,
-          // @ts-ignore -- prompt caching beta field
-          cache_control: { type: 'ephemeral' },
-        },
-      ],
+      max_tokens: 4096,
+      system: DENTAL_SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }],
-    },
-    {
-      headers: { 'anthropic-beta': 'prompt-caching-2024-07-31' },
-    } as Parameters<typeof client.messages.create>[1]
+    }
   );
 
-  const letter =
-    response.content[0]?.type === 'text' ? response.content[0].text : '';
+  const letter = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
   return { letter, model, promptUsed: userPrompt };
 }
