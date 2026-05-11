@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { db } from '../db';
-
+import crypto from 'crypto';
+import { sendVerificationEmail } from '../services/email';
 const router = Router();
 
 const registerSchema = z.object({
