@@ -41,147 +41,150 @@ export const sendVerificationEmail = async (email: string, token: string, practi
   
   const subject = 'Verify Your DentalAppeal Account';
   const html = `
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Verify Your DentalAppeal Account</title>
-    <style>
-      body {
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-        background-color: #f4f4f4;
-      }
-      .container {
-        max-width: 600px;
-        margin: 0 auto;
-        background-color: #ffffff;
-        border-radius: 16px;
-        overflow: hidden;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-      }
-      .header {
-        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
-        padding: 32px;
-        text-align: center;
-        border-bottom: 1px solid #e2e8f0;
-      }
-      .logo-container {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        margin-bottom: 8px;
-      }
-      .logo-img {
-        width: 48px;
-        height: 48px;
-        object-fit: contain;
-      }
-      .company-name {
-        font-size: 24px;
-        font-weight: 800;
-        background: linear-gradient(135deg, #1e3a5f, #2563eb);
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-      }
-      .content {
-        padding: 40px 32px;
-      }
-      .greeting {
-        font-size: 24px;
-        font-weight: 700;
-        color: #1e293b;
-        margin-bottom: 16px;
-      }
-      .message {
-        color: #475569;
-        line-height: 1.6;
-        margin-bottom: 24px;
-      }
-      .button {
-        display: inline-block;
-        background: linear-gradient(135deg, #2563eb, #1d4ed8);
-        color: white;
-        padding: 14px 32px;
-        text-decoration: none;
-        border-radius: 8px;
-        font-weight: 600;
-        margin: 16px 0;
-        box-shadow: 0 2px 4px rgba(37,99,235,0.2);
-      }
-      .button:hover {
-        background: linear-gradient(135deg, #1d4ed8, #1e40af);
-      }
-      .warning-box {
-        background-color: #fef3c7;
-        padding: 16px;
-        border-radius: 8px;
-        margin: 24px 0;
-        font-size: 14px;
-        border-left: 4px solid #f59e0b;
-      }
-      .footer {
-        text-align: center;
-        padding: 24px;
-        color: #94a3b8;
-        font-size: 12px;
-        border-top: 1px solid #e2e8f0;
-        background-color: #f8fafc;
-      }
-      .link-fallback {
-        font-size: 12px;
-        color: #64748b;
-        word-break: break-all;
-        background-color: #f1f5f9;
-        padding: 12px;
-        border-radius: 8px;
-        margin-top: 16px;
-      }
-    </style>
-  </head>
-  <body>
-    <div style="padding: 20px;">
-      <div class="container">
-        <div class="header">
-          <div class="logo-container">
-            <img src="https://app.dentalappeal.claims/logo.png" alt="DentalAppeal" class="logo-img" />
-            <span class="company-name">DentalAppeal</span>
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Verify Your DentalAppeal Account</title>
+      <style>
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          margin: 0;
+          padding: 0;
+          background-color: #f4f4f4;
+        }
+        .container {
+          max-width: 600px;
+          margin: 0 auto;
+          background-color: #ffffff;
+          border-radius: 16px;
+          overflow: hidden;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+        }
+        .header {
+          background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+          padding: 32px;
+          text-align: center;
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .logo-container {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          margin-bottom: 8px;
+        }
+        .logo-img {
+          width: 48px;
+          height: 48px;
+          object-fit: contain;
+        }
+        .company-name {
+          font-size: 24px;
+          font-weight: 800;
+          background: linear-gradient(135deg, #1e3a5f, #2563eb);
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+        }
+        .content {
+          padding: 40px 32px;
+        }
+        .greeting {
+          font-size: 24px;
+          font-weight: 700;
+          color: #1e293b;
+          margin-bottom: 16px;
+        }
+        .message {
+          color: #475569;
+          line-height: 1.6;
+          margin-bottom: 24px;
+        }
+        .button {
+          display: inline-block;
+          background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          color: white;
+          padding: 14px 32px;
+          text-decoration: none;
+          border-radius: 8px;
+          font-weight: 600;
+          margin: 16px 0;
+          box-shadow: 0 2px 4px rgba(37,99,235,0.2);
+        }
+        .button:hover {
+          background: linear-gradient(135deg, #1d4ed8, #1e40af);
+        }
+        .warning-box {
+          background-color: #fef3c7;
+          padding: 16px;
+          border-radius: 8px;
+          margin: 24px 0;
+          font-size: 14px;
+          border-left: 4px solid #f59e0b;
+        }
+        .footer {
+          text-align: center;
+          padding: 24px;
+          color: #94a3b8;
+          font-size: 12px;
+          border-top: 1px solid #e2e8f0;
+          background-color: #f8fafc;
+        }
+        .link-fallback {
+          font-size: 12px;
+          color: #64748b;
+          word-break: break-all;
+          background-color: #f1f5f9;
+          padding: 12px;
+          border-radius: 8px;
+          margin-top: 16px;
+        }
+      </style>
+    </head>
+    <body>
+      <div style="padding: 20px;">
+        <div class="container">
+          <div class="header">
+            <div class="logo-container">
+              <img src="https://app.dentalappeal.claims/logo.png" alt="DentalAppeal" class="logo-img" />
+              <span class="company-name">DentalAppeal</span>
+            </div>
           </div>
-        </div>
-        <div class="content">
-          <div class="greeting">Welcome, ${practiceName}!</div>
-          <p class="message">
-            Thank you for registering with DentalAppeal. Please verify your email address to activate your account and start managing your insurance appeals.
-          </p>
-          <div style="text-align: center;">
-            <a href="${verificationUrl}" class="button">Verify Email Address</a>
+          <div class="content">
+            <div class="greeting">Welcome, ${practiceName}!</div>
+            <p class="message">
+              Thank you for registering with DentalAppeal. Please verify your email address to activate your account and start managing your insurance appeals.
+            </p>
+            <div style="text-align: center;">
+              <a href="${verificationUrl}" class="button">Verify Email Address</a>
+            </div>
+            <div class="warning-box">
+              <strong>⚠️ This verification link expires in 24 hours.</strong>
+            </div>
+            <p style="font-size: 14px; color: #475569;">
+              If you didn't create an account with DentalAppeal, you can safely ignore this email.
+            </p>
+            <div class="link-fallback">
+              <strong>Can't click the button?</strong><br>
+              Copy and paste this link into your browser:<br>
+              <a href="${verificationUrl}" style="color: #2563eb;">${verificationUrl}</a>
+            </div>
           </div>
-          <div class="warning-box">
-            <strong>⚠️ This verification link expires in 24 hours.</strong>
+          <div class="footer">
+            <p><strong>DentalAppeal</strong> — AI-Powered Dental Insurance Appeals</p>
+            <p>&copy; 2026 Search Box Strategies. All rights reserved.</p>
+            <p><a href="https://app.dentalappeal.claims" style="color: #2563eb; text-decoration: none;">app.dentalappeal.claims</a></p>
           </div>
-          <p style="font-size: 14px; color: #475569;">
-            If you didn't create an account with DentalAppeal, you can safely ignore this email.
-          </p>
-          <div class="link-fallback">
-            <strong>Can't click the button?</strong><br>
-            Copy and paste this link into your browser:<br>
-            <a href="${verificationUrl}" style="color: #2563eb;">${verificationUrl}</a>
-          </div>
-        </div>
-        <div class="footer">
-          <p><strong>DentalAppeal</strong> — AI-Powered Dental Insurance Appeals</p>
-          <p>&copy; 2026 Search Box Strategies. All rights reserved.</p>
-          <p><a href="https://app.dentalappeal.claims" style="color: #2563eb; text-decoration: none;">app.dentalappeal.claims</a></p>
         </div>
       </div>
-    </div>
-  </body>
-  </html>
-`;
+    </body>
+    </html>
+  `;
+  
+  await sendEmail({ to: email, subject, html });
+};
 
 // Send password reset email
 export const sendPasswordResetEmail = async (email: string, token: string, name: string) => {
@@ -195,42 +198,26 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
       <meta charset="utf-8">
       <title>Reset Your Password</title>
       <style>
-        body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #1e3a5f, #2563eb); padding: 30px; text-align: center; }
-        .header h1 { color: white; margin: 0; }
-        .content { padding: 30px; }
-        .button { background-color: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 20px 0; }
-        .footer { text-align: center; padding: 20px; color: #64748b; font-size: 12px; border-top: 1px solid #e2e8f0; }
-        .warning { background-color: #fef3c7; padding: 12px; border-radius: 8px; margin: 20px 0; font-size: 14px; }
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .button { background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; }
+        .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
       </style>
     </head>
     <body>
       <div class="container">
         <div class="header">
-          <h1>🔐 DentalAppeal</h1>
-        </div>
-        <div class="content">
           <h2>Password Reset Request</h2>
-          <p>Hello ${name},</p>
-          <p>We received a request to reset your password. Click the button below to create a new password.</p>
-          <div style="text-align: center;">
-            <a href="${resetUrl}" class="button">Reset Password</a>
-          </div>
-          <div class="warning">
-            <strong>⚠️ This link expires in 1 hour.</strong>
-          </div>
-          <p style="font-size: 14px; color: #6b7280;">
-            If you didn't request this, you can safely ignore this email.
-          </p>
-          <p style="font-size: 14px; color: #6b7280;">
-            If the button doesn't work, copy and paste this link into your browser:<br>
-            <a href="${resetUrl}" style="color: #2563eb; word-break: break-all;">${resetUrl}</a>
-          </p>
         </div>
+        <p>Hello ${name},</p>
+        <p>We received a request to reset your password. Click the button below to create a new password.</p>
+        <div style="text-align: center;">
+          <a href="${resetUrl}" class="button">Reset Password</a>
+        </div>
+        <p style="font-size: 12px; color: #666;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
         <div class="footer">
           <p>DentalAppeal — AI-Powered Dental Insurance Appeals</p>
-          <p>&copy; 2026 Search Box Strategies. All rights reserved.</p>
         </div>
       </div>
     </body>
