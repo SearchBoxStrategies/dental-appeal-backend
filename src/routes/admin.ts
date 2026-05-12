@@ -311,6 +311,70 @@ router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
+// Manual subscription override
+router.post('/subscriptions/:id/override', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const practiceId = req.params.id;
+    const { status, reason } = req.body;
+    const adminId = req.user!.userId;
+    
+    // Get current status
+    const { rows: [practice] } = await db.query(
+      'SELECT subscription_status FROM practices WHERE id = $1',
+      [practiceId]
+    );
+    
+    if (!practice) {
+      return res.status(404).json({ error: 'Practice not found' });
+    }
+    
+    const oldStatus = practice.subscription_status;
+    
+    // Update status
+    await db.query(
+      `UPDATE practices 
+       SET subscription_status = $1,
+           subscription_override_reason = $2,
+           subscription_override_by = $3,
+           subscription_override_at = NOW()
+       WHERE id = $4`,
+      [status, reason, adminId, practiceId]
+    );
+    
+    // Log history
+    await db.query(
+      `INSERT INTO subscription_history (practice_id, old_status, new_status, reason, changed_by)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [practiceId, oldStatus, status, reason, adminId]
+    );
+    
+    res.json({ success: true, message: `Subscription status changed to ${status}` });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to override subscription' });
+  }
+});
+
+// Get subscription history
+router.get('/subscriptions/:id/history', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const practiceId = req.params.id;
+    
+    const { rows } = await db.query(`
+      SELECT sh.*, u.name as changed_by_name
+      FROM subscription_history sh
+      LEFT JOIN users u ON sh.changed_by = u.id
+      WHERE sh.practice_id = $1
+      ORDER BY sh.created_at DESC
+    `, [practiceId]);
+    
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
 // Get admin settings
 router.get('/settings', authenticate, requireAdmin, async (req, res) => {
   try {
