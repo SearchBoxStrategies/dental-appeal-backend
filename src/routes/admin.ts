@@ -423,5 +423,86 @@ router.put('/settings', authenticate, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+// Get all payments across all clients
+router.get('/payments', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT 
+        p.id,
+        p.amount_paid,
+        p.payment_method,
+        p.status,
+        p.created_at,
+        p.stripe_payment_intent_id,
+        u.id as user_id,
+        u.email,
+        u.name,
+        pr.name as practice_name,
+        pr.stripe_customer_id
+      FROM payments p
+      JOIN users u ON p.user_id = u.id
+      JOIN practices pr ON u.practice_id = pr.id
+      ORDER BY p.created_at DESC
+      LIMIT 100
+    `);
+    
+    // Get totals
+    const { rows: [totals] } = await db.query(`
+      SELECT 
+        COALESCE(SUM(amount_paid), 0) as total_revenue,
+        COUNT(*) as total_transactions,
+        COUNT(DISTINCT user_id) as unique_customers
+      FROM payments
+      WHERE status = 'succeeded'
+    `);
+    
+    res.json({ payments: rows, totals });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch payments' });
+  }
+});
 
+// Get payment summary for dashboard
+router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => {
+  try {
+    // This month vs last month
+    const { rows: [thisMonth] } = await db.query(`
+      SELECT 
+        COALESCE(SUM(amount_paid), 0) as total,
+        COUNT(*) as count
+      FROM payments
+      WHERE status = 'succeeded'
+        AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
+    `);
+    
+    const { rows: [lastMonth] } = await db.query(`
+      SELECT 
+        COALESCE(SUM(amount_paid), 0) as total,
+        COUNT(*) as count
+      FROM payments
+      WHERE status = 'succeeded'
+        AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')
+    `);
+    
+    const percentChange = lastMonth.total > 0 
+      ? ((thisMonth.total - lastMonth.total) / lastMonth.total * 100).toFixed(1)
+      : 0;
+    
+    res.json({
+      thisMonth: {
+        total: parseFloat(thisMonth.total) || 0,
+        count: parseInt(thisMonth.count) || 0
+      },
+      lastMonth: {
+        total: parseFloat(lastMonth.total) || 0,
+        count: parseInt(lastMonth.count) || 0
+      },
+      percentChange: parseFloat(percentChange)
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch payment summary' });
+  }
+});
 export default router;
