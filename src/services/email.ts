@@ -186,6 +186,39 @@ export const sendVerificationEmail = async (email: string, token: string, practi
   await sendEmail({ to: email, subject, html });
 };
 
+export const sendAdminVerificationCode = async (email: string, code: string, name: string) => {
+  const subject = 'Admin Portal Verification Code';
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Admin Verification Code</title>
+      <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; }
+        .code { font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f0f0f0; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0; font-family: monospace; }
+        .warning { color: #e67e22; font-size: 12px; text-align: center; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Admin Portal Access</h2>
+        <p>Hello ${name},</p>
+        <p>You are attempting to access the DentalAppeal Admin Portal. Please use the verification code below:</p>
+        <div class="code">${code}</div>
+        <p>This code will expire in 10 minutes.</p>
+        <div class="warning">
+          ⚠️ If you did not request this code, please ignore this email and ensure your account is secure.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+  
+  await sendEmail({ to: email, subject, html });
+};
+
 // Send password reset email
 export const sendPasswordResetEmail = async (email: string, token: string, name: string) => {
   const resetUrl = `${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/reset-password/${token}`;
