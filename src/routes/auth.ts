@@ -4,9 +4,14 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { db } from '../db';
-import { sendVerificationEmail, sendPasswordResetEmail } from '../services/email';
+import { sendVerificationEmail, sendPasswordResetEmail, sendAdminVerificationCode } from '../services/email';
 
 const router = Router();
+
+// Helper: Generate 6-digit verification code
+const generateVerificationCode = (): string => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
 
 const registerSchema = z.object({
   practiceName: z.string().min(1),
@@ -25,7 +30,6 @@ router.post('/register', async (req, res) => {
     try {
       await client.query('BEGIN');
 
-      // Check if practice already exists
       let practiceId;
       const { rows: existingPractice } = await client.query(
         'SELECT id FROM practices WHERE email = $1',
@@ -42,7 +46,6 @@ router.post('/register', async (req, res) => {
         practiceId = practice.id;
       }
 
-      // Generate verification token
       const verificationToken = crypto.randomBytes(32).toString('hex');
       const tokenExpiry = new Date();
       tokenExpiry.setHours(tokenExpiry.getHours() + 24);
@@ -61,7 +64,6 @@ router.post('/register', async (req, res) => {
 
       await client.query('COMMIT');
 
-      // Send verification email
       await sendVerificationEmail(email, verificationToken, practiceName);
 
       res.status(201).json({
@@ -91,7 +93,6 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// Verify email with token
 router.get('/verify/:token', async (req, res) => {
   try {
     const { token } = req.params;
@@ -121,7 +122,6 @@ router.get('/verify/:token', async (req, res) => {
       [user.id]
     );
     
-    // Redirect to login with success message
     res.redirect(`${process.env.FRONTEND_URL}/login?verified=true`);
   } catch (error) {
     console.error(error);
@@ -129,7 +129,6 @@ router.get('/verify/:token', async (req, res) => {
   }
 });
 
-// Resend verification email
 router.post('/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
@@ -150,7 +149,6 @@ router.post('/resend-verification', async (req, res) => {
       return res.status(400).json({ error: 'Email already verified' });
     }
     
-    // Generate new token
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const tokenExpiry = new Date();
     tokenExpiry.setHours(tokenExpiry.getHours() + 24);
@@ -195,7 +193,6 @@ router.post('/login', async (req, res) => {
       return;
     }
 
-    // Check if email is verified
     if (!user.email_verified) {
       res.status(401).json({ 
         error: 'Please verify your email address before logging in',
@@ -211,6 +208,31 @@ router.post('/login', async (req, res) => {
       return;
     }
 
+    // If user is admin, send verification code
+    if (user.is_admin) {
+      const verificationCode = generateVerificationCode();
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+      
+      await db.query(
+        `UPDATE users 
+         SET admin_verification_code = $1, 
+             admin_verification_expires = $2,
+             admin_verification_attempts = 0
+         WHERE id = $3`,
+        [verificationCode, expiresAt, user.id]
+      );
+      
+      await sendAdminVerificationCode(user.email, verificationCode, user.name);
+      
+      res.json({
+        requiresAdminVerification: true,
+        userId: user.id,
+        email: user.email
+      });
+      return;
+    }
+    
     const token = jwt.sign(
       { 
         userId: user.id, 
@@ -229,7 +251,8 @@ router.post('/login', async (req, res) => {
         email: user.email, 
         name: user.name, 
         role: user.role,
-        email_verified: user.email_verified
+        email_verified: user.email_verified,
+        is_admin: user.is_admin
       },
       practice: {
         id: user.practice_id,
@@ -244,6 +267,119 @@ router.post('/login', async (req, res) => {
       return;
     }
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/verify-admin-code', async (req, res) => {
+  try {
+    const { userId, code } = req.body;
+    
+    const { rows: [user] } = await db.query(
+      `SELECT id, email, name, admin_verification_code, admin_verification_expires, 
+              admin_verification_attempts, practice_id
+       FROM users 
+       WHERE id = $1 AND is_admin = TRUE`,
+      [userId]
+    );
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found or not an admin' });
+    }
+    
+    if (user.admin_verification_attempts >= 5) {
+      return res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
+    }
+    
+    if (!user.admin_verification_code || new Date() > user.admin_verification_expires) {
+      return res.status(400).json({ error: 'Verification code expired. Please request a new one.' });
+    }
+    
+    if (user.admin_verification_code !== code) {
+      await db.query(
+        'UPDATE users SET admin_verification_attempts = admin_verification_attempts + 1 WHERE id = $1',
+        [userId]
+      );
+      return res.status(400).json({ error: 'Invalid verification code' });
+    }
+    
+    await db.query(
+      `UPDATE users 
+       SET admin_verification_code = NULL, 
+           admin_verification_expires = NULL,
+           admin_verification_attempts = 0
+       WHERE id = $1`,
+      [userId]
+    );
+    
+    const { rows: [practice] } = await db.query(
+      'SELECT name, subscription_status FROM practices WHERE id = $1',
+      [user.practice_id]
+    );
+    
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        practiceId: user.practice_id, 
+        role: 'admin', 
+        practiceName: practice.name 
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: '7d' }
+    );
+    
+    res.json({
+      token,
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        name: user.name, 
+        role: 'admin',
+        is_admin: true
+      },
+      practice: {
+        id: user.practice_id,
+        name: practice.name,
+        subscriptionStatus: practice.subscription_status,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.post('/resend-admin-code', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    const { rows: [user] } = await db.query(
+      'SELECT id, email, name FROM users WHERE id = $1 AND is_admin = TRUE',
+      [userId]
+    );
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const verificationCode = generateVerificationCode();
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+    
+    await db.query(
+      `UPDATE users 
+       SET admin_verification_code = $1, 
+           admin_verification_expires = $2,
+           admin_verification_attempts = 0
+       WHERE id = $3`,
+      [verificationCode, expiresAt, user.id]
+    );
+    
+    await sendAdminVerificationCode(user.email, verificationCode, user.name);
+    
+    res.json({ message: 'Verification code sent' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to resend code' });
   }
 });
 
@@ -293,7 +429,6 @@ router.get('/me', async (req, res) => {
   }
 });
 
-// Forgot password - Request reset link
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
@@ -303,31 +438,26 @@ router.post('/forgot-password', async (req, res) => {
       return;
     }
     
-    // Check if user exists
     const { rows: users } = await db.query(
       'SELECT id, email, name FROM users WHERE email = $1',
       [email]
     );
     
     if (users.length === 0) {
-      // For security, don't reveal that email doesn't exist
       res.json({ message: 'If an account exists, a reset link has been sent' });
       return;
     }
     
     const user = users[0];
-    
-    // Generate reset token
     const resetToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    const tokenExpiry = Date.now() + 60 * 60 * 1000; // 1 hour
+    const tokenExpiry = Date.now() + 60 * 60 * 1000;
     
     await db.query(
       'UPDATE users SET reset_password_token = $1, reset_password_expires = $2 WHERE id = $3',
       [hashedToken, tokenExpiry, user.id]
     );
     
-    // Send password reset email
     await sendPasswordResetEmail(email, resetToken, user.name);
     
     res.json({ message: 'If an account exists, a reset link has been sent' });
@@ -337,7 +467,6 @@ router.post('/forgot-password', async (req, res) => {
   }
 });
 
-// Reset password - Use token to set new password
 router.post('/reset-password/:token', async (req, res) => {
   try {
     const { token } = req.params;
