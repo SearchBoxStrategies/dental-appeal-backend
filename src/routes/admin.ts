@@ -456,7 +456,14 @@ router.get('/payments', authenticate, requireAdmin, async (req, res) => {
       WHERE status = 'succeeded'
     `);
     
-    res.json({ payments: rows, totals });
+    res.json({ 
+      payments: rows, 
+      totals: {
+        total_revenue: parseFloat(totals?.total_revenue) || 0,
+        total_transactions: parseInt(totals?.total_transactions) || 0,
+        unique_customers: parseInt(totals?.unique_customers) || 0
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Failed to fetch payments' });
