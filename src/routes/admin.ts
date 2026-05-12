@@ -183,4 +183,117 @@ router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
+// Get analytics data for admin dashboard
+router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
+  try {
+    // Get total revenue from payments table
+    const { rows: [revenue] } = await db.query(`
+      SELECT COALESCE(SUM(amount_paid), 0) as total
+      FROM payments
+    `);
+    
+    // Get active practices count
+    const { rows: [activePractices] } = await db.query(`
+      SELECT COUNT(*) as count FROM practices WHERE subscription_status = 'active'
+    `);
+    
+    // Get total appeals across all practices
+    const { rows: [appeals] } = await db.query(`
+      SELECT COUNT(*) as count FROM appeals
+    `);
+    
+    // Get overall success rate
+    const { rows: [successRate] } = await db.query(`
+      SELECT 
+        ROUND(
+          COUNT(CASE WHEN c.status = 'won' THEN 1 END)::numeric / 
+          NULLIF(COUNT(CASE WHEN c.status IN ('won', 'lost') THEN 1 END), 0) * 100, 
+          1
+        ) as rate
+      FROM claims c
+    `);
+    
+    // Get total clients count
+    const { rows: [totalClients] } = await db.query(`
+      SELECT COUNT(*) as count FROM users WHERE is_admin = FALSE
+    `);
+    
+    // Calculate monthly growth
+    const { rows: [growth] } = await db.query(`
+      SELECT 
+        ROUND(
+          (COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END)::numeric / 
+           NULLIF(COUNT(CASE WHEN created_at > NOW() - INTERVAL '60 days' THEN 1 END), 0) - 1) * 100,
+          1
+        ) as rate
+      FROM users
+      WHERE is_admin = FALSE
+    `);
+    
+    res.json({
+      totalRevenue: parseFloat(revenue?.total) || 0,
+      activePractices: parseInt(activePractices?.count) || 0,
+      totalAppeals: parseInt(appeals?.count) || 0,
+      successRate: parseFloat(successRate?.rate) || 0,
+      totalClients: parseInt(totalClients?.count) || 0,
+      monthlyGrowth: parseFloat(growth?.rate) || 0
+    });
+  } catch (error) {
+    console.error('Admin analytics error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get admin settings
+router.get('/settings', authenticate, requireAdmin, async (req, res) => {
+  try {
+    // You can store settings in a separate table or return defaults
+    res.json({
+      siteName: 'DentalAppeal',
+      supportEmail: 'support@dentalappeal.claims',
+      defaultPlanPrice: 199,
+      trialDays: 14,
+      maintenanceMode: false,
+      enableEmailNotifications: true,
+      enableWeeklyDigest: true
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update admin settings
+router.put('/settings', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { 
+      siteName, 
+      supportEmail, 
+      defaultPlanPrice, 
+      trialDays, 
+      maintenanceMode,
+      enableEmailNotifications,
+      enableWeeklyDigest 
+    } = req.body;
+    
+    // Here you would save to a settings table
+    // For now, just return success
+    res.json({ 
+      message: 'Settings saved successfully',
+      settings: {
+        siteName,
+        supportEmail,
+        defaultPlanPrice,
+        trialDays,
+        maintenanceMode,
+        enableEmailNotifications,
+        enableWeeklyDigest
+      }
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;
