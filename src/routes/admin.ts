@@ -96,6 +96,73 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
       LIMIT 10
     `, [clientId]);
 
+    // Get client notes
+router.get('/clients/:id/notes', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const clientId = req.params.id;
+    
+    const { rows } = await db.query(`
+      SELECT 
+        cn.*,
+        u.name as author_name
+      FROM client_notes cn
+      LEFT JOIN users u ON cn.author_id = u.id
+      WHERE cn.client_id = $1
+      ORDER BY cn.created_at DESC
+    `, [clientId]);
+    
+    res.json(rows);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch notes' });
+  }
+});
+
+// Add client note
+router.post('/clients/:id/notes', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const clientId = req.params.id;
+    const { note } = req.body;
+    const adminId = req.user!.userId;
+    
+    if (!note || note.trim() === '') {
+      return res.status(400).json({ error: 'Note cannot be empty' });
+    }
+    
+    const { rows: [newNote] } = await db.query(
+      `INSERT INTO client_notes (client_id, author_id, note, created_at)
+       VALUES ($1, $2, $3, NOW())
+       RETURNING *`,
+      [clientId, adminId, note]
+    );
+    
+    // Get author name
+    const { rows: [author] } = await db.query(
+      'SELECT name FROM users WHERE id = $1',
+      [adminId]
+    );
+    
+    res.status(201).json({
+      ...newNote,
+      author_name: author?.name || 'Admin'
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to add note' });
+  }
+});
+
+// Delete client note
+router.delete('/notes/:id', authenticate, requireAdmin, async (req, res) => {
+  try {
+    await db.query('DELETE FROM client_notes WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete note' });
+  }
+});
+
     // Get payment/summary stats (for when Stripe is integrated)
     const { rows: [paymentStats] } = await db.query(`
       SELECT 
