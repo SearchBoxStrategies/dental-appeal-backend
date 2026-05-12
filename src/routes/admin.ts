@@ -473,8 +473,8 @@ router.get('/payments', authenticate, requireAdmin, async (req, res) => {
 // Get payment summary for dashboard
 router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => {
   try {
-    // This month vs last month
-    const { rows: [thisMonth] } = await db.query(`
+    // This month
+    const thisMonthResult = await db.query(`
       SELECT 
         COALESCE(SUM(amount_paid), 0) as total,
         COUNT(*) as count
@@ -483,7 +483,8 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
         AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
     `);
     
-    const { rows: [lastMonth] } = await db.query(`
+    // Last month
+    const lastMonthResult = await db.query(`
       SELECT 
         COALESCE(SUM(amount_paid), 0) as total,
         COUNT(*) as count
@@ -492,8 +493,10 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
         AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')
     `);
     
-    const thisMonthTotal = parseFloat(thisMonth?.total) || 0;
-    const lastMonthTotal = parseFloat(lastMonth?.total) || 0;
+    const thisMonthTotal = parseFloat(thisMonthResult.rows[0]?.total) || 0;
+    const lastMonthTotal = parseFloat(lastMonthResult.rows[0]?.total) || 0;
+    const thisMonthCount = parseInt(thisMonthResult.rows[0]?.count) || 0;
+    const lastMonthCount = parseInt(lastMonthResult.rows[0]?.count) || 0;
     
     let percentChange = 0;
     if (lastMonthTotal > 0) {
@@ -503,16 +506,16 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
     res.json({
       thisMonth: {
         total: thisMonthTotal,
-        count: parseInt(thisMonth?.count) || 0
+        count: thisMonthCount
       },
       lastMonth: {
         total: lastMonthTotal,
-        count: parseInt(lastMonth?.count) || 0
+        count: lastMonthCount
       },
-      percentChange: parseFloat(percentChange.toFixed(1))
+      percentChange: Number(percentChange.toFixed(1))
     });
   } catch (error) {
-    console.error(error);
+    console.error('Payment summary error:', error);
     res.status(500).json({ error: 'Failed to fetch payment summary' });
   }
 });
