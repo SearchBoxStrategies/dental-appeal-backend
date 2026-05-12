@@ -485,20 +485,24 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
         AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')
     `);
     
-    const percentChange = lastMonth.total > 0 
-      ? ((thisMonth.total - lastMonth.total) / lastMonth.total * 100).toFixed(1)
-      : 0;
+    const thisMonthTotal = parseFloat(thisMonth?.total) || 0;
+    const lastMonthTotal = parseFloat(lastMonth?.total) || 0;
+    
+    let percentChange = 0;
+    if (lastMonthTotal > 0) {
+      percentChange = ((thisMonthTotal - lastMonthTotal) / lastMonthTotal) * 100;
+    }
     
     res.json({
       thisMonth: {
-        total: parseFloat(thisMonth.total) || 0,
-        count: parseInt(thisMonth.count) || 0
+        total: thisMonthTotal,
+        count: parseInt(thisMonth?.count) || 0
       },
       lastMonth: {
-        total: parseFloat(lastMonth.total) || 0,
-        count: parseInt(lastMonth.count) || 0
+        total: lastMonthTotal,
+        count: parseInt(lastMonth?.count) || 0
       },
-      percentChange: parseFloat(percentChange)
+      percentChange: parseFloat(percentChange.toFixed(1))
     });
   } catch (error) {
     console.error(error);
