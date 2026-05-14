@@ -13,22 +13,50 @@ const generateVerificationCode = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Helper: Generate affiliate code from email
+const generateAffiliateCode = (email: string): string => {
+  const prefix = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  const random = crypto.randomBytes(4).toString('hex');
+  return `${prefix}_${random}`;
+};
+
 const registerSchema = z.object({
   practiceName: z.string().min(1),
   name: z.string().min(1),
   email: z.string().email(),
   password: z.string().min(6),
+  referralCode: z.string().optional(),
 });
 
 router.post('/register', async (req, res) => {
   console.log('Register endpoint hit');
   try {
-    const { practiceName, name, email, password } = registerSchema.parse(req.body);
+    const { practiceName, name, email, password, referralCode } = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(password, 10);
 
     const client = await db.connect();
     try {
       await client.query('BEGIN');
+
+      // Check if referral code is valid
+      let referredByAffiliateId = null;
+      if (referralCode) {
+        const { rows: [affiliate] } = await client.query(
+          'SELECT id FROM affiliates WHERE affiliate_code = $1 AND is_active = true',
+          [referralCode]
+        );
+        if (affiliate) {
+          referredByAffiliateId = affiliate.id;
+          
+          // Update the referral record from 'clicked' to 'signed_up'
+          await client.query(
+            `UPDATE affiliate_referrals 
+             SET signed_up_at = NOW(), status = 'signed_up'
+             WHERE referral_code = $1 AND signed_up_at IS NULL`,
+            [referralCode]
+          );
+        }
+      }
 
       let practiceId;
       const { rows: existingPractice } = await client.query(
@@ -40,10 +68,19 @@ router.post('/register', async (req, res) => {
         practiceId = existingPractice[0].id;
       } else {
         const { rows: [practice] } = await client.query(
-          'INSERT INTO practices (name, email, subscription_status) VALUES ($1, $2, $3) RETURNING id',
-          [practiceName, email, 'inactive']
+          `INSERT INTO practices (name, email, subscription_status, referred_by_affiliate_id, referral_code_used) 
+           VALUES ($1, $2, 'inactive', $3, $4) RETURNING id`,
+          [practiceName, email, referredByAffiliateId, referralCode]
         );
         practiceId = practice.id;
+        
+        // Update affiliate's signup count
+        if (referredByAffiliateId) {
+          await client.query(
+            'UPDATE affiliates SET total_signups = total_signups + 1 WHERE id = $1',
+            [referredByAffiliateId]
+          );
+        }
       }
 
       const verificationToken = crypto.randomBytes(32).toString('hex');
@@ -501,6 +538,40 @@ router.post('/reset-password/:token', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin: Get all affiliates
+router.get('/admin/affiliates', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      res.status(401).json({ error: 'No token provided' });
+      return;
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
+
+    if (!decoded.isAdmin) {
+      res.status(403).json({ error: 'Admin access required' });
+      return;
+    }
+
+    const { rows: affiliates } = await db.query(
+      `SELECT a.*, 
+              COUNT(ar.id) as total_referrals,
+              SUM(CASE WHEN ar.status = 'converted' THEN 1 ELSE 0 END) as total_converted
+       FROM affiliates a
+       LEFT JOIN affiliate_referrals ar ON a.id = ar.affiliate_id
+       GROUP BY a.id
+       ORDER BY a.created_at DESC`
+    );
+
+    res.json(affiliates);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch affiliates' });
   }
 });
 
