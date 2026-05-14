@@ -14,6 +14,7 @@ import analyticsRouter from './routes/analytics';
 import bulkUploadRouter from './routes/bulkUpload';
 import practiceRouter from './routes/practice';
 import insuranceRouter from './routes/insurance';
+import affiliateRouter from './routes/affiliate'; // 🆕 ADD THIS
 
 const app = express();
 console.log('✅ Backend starting up...');
@@ -45,6 +46,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/bulk', bulkUploadRouter);
 app.use('/api/practice', practiceRouter);
 app.use('/api/insurance', insuranceRouter);
+app.use('/api/affiliate', affiliateRouter); // 🆕 ADD THIS - Affiliate routes
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
@@ -65,7 +67,8 @@ const routers = [
   { path: '/api/appeals', router: appealsRouter, name: 'Appeals' },
   { path: '/api/billing', router: billingRouter, name: 'Billing' },
   { path: '/api/cdt-codes', router: cdtCodesRouter, name: 'CDTCodes' },
-  { path: '/api/admin', router: adminRouter, name: 'Admin' }
+  { path: '/api/admin', router: adminRouter, name: 'Admin' },
+  { path: '/api/affiliate', router: affiliateRouter, name: 'Affiliate' } // 🆕 ADD THIS
 ];
 
 routers.forEach(({ path, router, name }) => {
