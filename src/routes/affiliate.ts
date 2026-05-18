@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db';
-import { authenticate } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import crypto from 'crypto';
 
 const router = Router();
@@ -134,7 +134,7 @@ router.get('/stats/:code', async (req, res) => {
 // ============================================
 
 // GET /api/affiliate/dashboard - Get affiliate dashboard data
-router.get('/dashboard', authenticate, async (req, res) => {
+router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   try {
     const userEmail = req.user!.email;
 
@@ -204,7 +204,7 @@ router.get('/dashboard', authenticate, async (req, res) => {
 });
 
 // GET /api/affiliate/link - Get affiliate referral link
-router.get('/link', authenticate, async (req, res) => {
+router.get('/link', authenticate, async (req: AuthRequest, res) => {
   try {
     const userEmail = req.user!.email;
 
@@ -226,7 +226,7 @@ router.get('/link', authenticate, async (req, res) => {
 });
 
 // GET /api/affiliate/earnings - Get earnings summary
-router.get('/earnings', authenticate, async (req, res) => {
+router.get('/earnings', authenticate, async (req: AuthRequest, res) => {
   try {
     const userEmail = req.user!.email;
 
@@ -264,9 +264,11 @@ router.get('/earnings', authenticate, async (req, res) => {
 // ============================================
 
 // GET /api/affiliate/admin/list - Get all affiliates (admin only)
-router.get('/admin/list', authenticate, async (req, res) => {
+router.get('/admin/list', authenticate, async (req: AuthRequest, res) => {
   try {
-    // Check if user is admin
+    console.log('Admin list route - user:', req.user);
+    console.log('isAdmin value:', req.user?.isAdmin);
+    
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -289,8 +291,11 @@ router.get('/admin/list', authenticate, async (req, res) => {
 });
 
 // GET /api/affiliate/admin/commissions - Get all commissions (admin only)
-router.get('/admin/commissions', authenticate, async (req, res) => {
+router.get('/admin/commissions', authenticate, async (req: AuthRequest, res) => {
   try {
+    console.log('Admin commissions route - user:', req.user);
+    console.log('isAdmin value:', req.user?.isAdmin);
+    
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -313,7 +318,7 @@ router.get('/admin/commissions', authenticate, async (req, res) => {
 });
 
 // PUT /api/affiliate/admin/:id/approve - Approve affiliate (admin only)
-router.put('/admin/:id/approve', authenticate, async (req, res) => {
+router.put('/admin/:id/approve', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
@@ -340,7 +345,7 @@ router.put('/admin/:id/approve', authenticate, async (req, res) => {
 });
 
 // POST /api/affiliate/admin/:id/payout - Mark commissions as paid (admin only)
-router.post('/admin/:id/payout', authenticate, async (req, res) => {
+router.post('/admin/:id/payout', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
@@ -393,7 +398,7 @@ router.post('/admin/:id/payout', authenticate, async (req, res) => {
 });
 
 // GET /api/affiliate/admin/affiliate/:id - Get single affiliate (admin only)
-router.get('/admin/affiliate/:id', authenticate, async (req, res) => {
+router.get('/admin/affiliate/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
