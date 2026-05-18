@@ -20,20 +20,17 @@ const generateAffiliateCode = (email: string): string => {
 router.post('/signup', async (req, res) => {
   const { fullName, email, companyName, payoutEmail, payoutMethod } = req.body;
 
-  // Validation
   if (!fullName || !email) {
     return res.status(400).json({ error: 'Full name and email are required' });
   }
 
   try {
-    // Check if affiliate already exists
     const existing = await db.query(
       'SELECT id, affiliate_code FROM affiliates WHERE email = $1',
       [email]
     );
 
     if (existing.rows.length > 0) {
-      // Return existing affiliate info
       const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existing.rows[0].affiliate_code}`;
       return res.json({
         success: true,
@@ -67,7 +64,7 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// GET /api/affiliate/track/:code - Track affiliate click (redirects to registration)
+// GET /api/affiliate/track/:code - Track affiliate click
 router.get('/track/:code', async (req, res) => {
   const { code } = req.params;
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -80,25 +77,20 @@ router.get('/track/:code', async (req, res) => {
     );
 
     if (affiliate.rows.length > 0) {
-      // Record the click
       await db.query(
         `INSERT INTO affiliate_referrals (affiliate_id, referral_code, click_ip, click_user_agent, status)
          VALUES ($1, $2, $3, $4, 'clicked')`,
         [affiliate.rows[0].id, code, ip, userAgent]
       );
 
-      // Update click count
       await db.query(
         'UPDATE affiliates SET total_clicks = total_clicks + 1 WHERE id = $1',
         [affiliate.rows[0].id]
       );
       
       console.log(`📊 Affiliate click tracked: ${code} from ${ip}`);
-    } else {
-      console.log(`⚠️ Invalid affiliate code clicked: ${code}`);
     }
 
-    // Redirect to registration page with ref param
     res.redirect(`${process.env.FRONTEND_URL}/register?ref=${code}`);
   } catch (error) {
     console.error('Track error:', error);
@@ -130,10 +122,10 @@ router.get('/stats/:code', async (req, res) => {
 });
 
 // ============================================
-// AUTHENTICATED ROUTES (Require login)
+// AUTHENTICATED ROUTES
 // ============================================
 
-// GET /api/affiliate/dashboard - Get affiliate dashboard data
+// GET /api/affiliate/dashboard
 router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   try {
     const userEmail = req.user!.email;
@@ -153,7 +145,6 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
 
     const affiliateId = affiliate.rows[0].id;
 
-    // Get recent referrals
     const referrals = await db.query(
       `SELECT ar.*, p.name as practice_name, p.subscription_status
        FROM affiliate_referrals ar
@@ -164,7 +155,6 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       [affiliateId]
     );
 
-    // Get recent commissions
     const commissions = await db.query(
       `SELECT ac.*, ar.referral_code, p.name as practice_name
        FROM affiliate_commissions ac
@@ -176,7 +166,6 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
       [affiliateId]
     );
 
-    // Get monthly earnings summary
     const monthlyEarnings = await db.query(
       `SELECT 
          TO_CHAR(period_start, 'YYYY-MM') as month,
@@ -203,7 +192,7 @@ router.get('/dashboard', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/affiliate/link - Get affiliate referral link
+// GET /api/affiliate/link
 router.get('/link', authenticate, async (req: AuthRequest, res) => {
   try {
     const userEmail = req.user!.email;
@@ -225,7 +214,7 @@ router.get('/link', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/affiliate/earnings - Get earnings summary
+// GET /api/affiliate/earnings
 router.get('/earnings', authenticate, async (req: AuthRequest, res) => {
   try {
     const userEmail = req.user!.email;
@@ -260,15 +249,12 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res) => {
 });
 
 // ============================================
-// ADMIN ROUTES (Require admin authentication)
+// ADMIN ROUTES
 // ============================================
 
-// GET /api/affiliate/admin/list - Get all affiliates (admin only)
+// GET /api/affiliate/admin/list
 router.get('/admin/list', authenticate, async (req: AuthRequest, res) => {
   try {
-    console.log('Admin list route - user:', req.user);
-    console.log('isAdmin value:', req.user?.isAdmin);
-    
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -290,12 +276,9 @@ router.get('/admin/list', authenticate, async (req: AuthRequest, res) => {
   }
 });
 
-// GET /api/affiliate/admin/commissions - Get all commissions (admin only)
+// GET /api/affiliate/admin/commissions
 router.get('/admin/commissions', authenticate, async (req: AuthRequest, res) => {
   try {
-    console.log('Admin commissions route - user:', req.user);
-    console.log('isAdmin value:', req.user?.isAdmin);
-    
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
@@ -317,7 +300,7 @@ router.get('/admin/commissions', authenticate, async (req: AuthRequest, res) => 
   }
 });
 
-// PUT /api/affiliate/admin/:id/approve - Approve affiliate (admin only)
+// PUT /api/affiliate/admin/:id/approve
 router.put('/admin/:id/approve', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -344,7 +327,7 @@ router.put('/admin/:id/approve', authenticate, async (req: AuthRequest, res) => 
   }
 });
 
-// POST /api/affiliate/admin/:id/payout - Mark commissions as paid (admin only)
+// POST /api/affiliate/admin/:id/payout
 router.post('/admin/:id/payout', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -353,7 +336,6 @@ router.post('/admin/:id/payout', authenticate, async (req: AuthRequest, res) => 
 
     const { id } = req.params;
 
-    // Get all pending commissions for this affiliate
     const pendingCommissions = await db.query(
       `SELECT ac.id, ac.amount
        FROM affiliate_commissions ac
@@ -367,9 +349,8 @@ router.post('/admin/:id/payout', authenticate, async (req: AuthRequest, res) => 
     }
 
     const totalAmount = pendingCommissions.rows.reduce((sum, c) => sum + parseFloat(c.amount), 0);
-
-    // Mark all as paid
     const ids = pendingCommissions.rows.map(c => c.id);
+
     await db.query(
       `UPDATE affiliate_commissions 
        SET status = 'paid', paid_at = NOW()
@@ -377,7 +358,6 @@ router.post('/admin/:id/payout', authenticate, async (req: AuthRequest, res) => 
       [ids]
     );
 
-    // Update affiliate's paid/pending earnings
     await db.query(
       `UPDATE affiliates 
        SET pending_earnings = 0,
@@ -397,7 +377,7 @@ router.post('/admin/:id/payout', authenticate, async (req: AuthRequest, res) => 
   }
 });
 
-// GET /api/affiliate/admin/affiliate/:id - Get single affiliate (admin only)
+// GET /api/affiliate/admin/affiliate/:id
 router.get('/admin/affiliate/:id', authenticate, async (req: AuthRequest, res) => {
   try {
     if (!req.user?.isAdmin) {
