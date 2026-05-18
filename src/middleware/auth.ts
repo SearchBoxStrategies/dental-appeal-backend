@@ -32,13 +32,6 @@ export const authenticate = async (req: AuthRequest, res: Response, next: NextFu
       return res.status(401).json({ error: 'User not found' });
     }
 
-    console.log('Auth middleware - setting user:', { 
-      userId: user.id, 
-      email: user.email, 
-      isAdmin: user.is_admin === true,
-      practiceId: user.practice_id
-    });
-
     req.user = {
       userId: user.id,
       email: user.email,
