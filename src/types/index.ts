@@ -4,11 +4,3 @@ export interface JwtPayload {
   role: string;
   practiceName: string;
 }
-
-declare global {
-  namespace Express {
-    interface Request {
-      user?: JwtPayload;
-    }
-  }
-}
