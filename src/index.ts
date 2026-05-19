@@ -2,7 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import adminRouter from './routes/admin';
-import authRouter from './routes/auth';
+import authRouter from './routes/auth.js';
 import claimsRouter from './routes/claims';
 import appealsRouter from './routes/appeals';
 import billingRouter from './routes/billing';
