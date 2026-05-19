@@ -2,17 +2,18 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { db } from '../db';
 
-// Augment the Express Request type
+export interface AuthUser {
+  userId: number;
+  email: string;
+  isAdmin: boolean;
+  practiceId?: number;
+  role?: string;
+}
+
 declare global {
   namespace Express {
     interface Request {
-      user?: {
-        userId: number;
-        email: string;
-        isAdmin: boolean;
-        practiceId?: number;
-        role?: string;
-      };
+      user?: AuthUser;
     }
   }
 }
@@ -27,7 +28,6 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
     const token = authHeader.split(' ')[1];
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
 
-    // Get user from database to check is_admin
     const { rows: [user] } = await db.query(
       `SELECT id, email, is_admin, practice_id, role FROM users WHERE id = $1`,
       [decoded.userId]
@@ -35,7 +35,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
-    }
+    {
 
     req.user = {
       userId: user.id,
