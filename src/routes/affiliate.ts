@@ -5,17 +5,6 @@ import crypto from 'crypto';
 
 const router = Router();
 
-// Extend Request type locally
-interface AuthReq extends Request {
-  user?: {
-    userId: number;
-    email: string;
-    isAdmin: boolean;
-    practiceId?: number;
-    role?: string;
-  };
-}
-
 // Generate unique affiliate code from email
 const generateAffiliateCode = (email: string): string => {
   const prefix = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -137,7 +126,7 @@ router.get('/stats/:code', async (req, res) => {
 // ============================================
 
 // GET /api/affiliate/dashboard
-router.get('/dashboard', authenticate, async (req: AuthReq, res) => {
+router.get('/dashboard', authenticate, async (req: Request, res) => {
   try {
     const userEmail = req.user!.email;
 
@@ -204,7 +193,7 @@ router.get('/dashboard', authenticate, async (req: AuthReq, res) => {
 });
 
 // GET /api/affiliate/link
-router.get('/link', authenticate, async (req: AuthReq, res) => {
+router.get('/link', authenticate, async (req: Request, res) => {
   try {
     const userEmail = req.user!.email;
 
@@ -226,7 +215,7 @@ router.get('/link', authenticate, async (req: AuthReq, res) => {
 });
 
 // GET /api/affiliate/earnings
-router.get('/earnings', authenticate, async (req: AuthReq, res) => {
+router.get('/earnings', authenticate, async (req: Request, res) => {
   try {
     const userEmail = req.user!.email;
 
@@ -264,7 +253,7 @@ router.get('/earnings', authenticate, async (req: AuthReq, res) => {
 // ============================================
 
 // GET /api/affiliate/admin/list
-router.get('/admin/list', authenticate, async (req: AuthReq, res) => {
+router.get('/admin/list', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
@@ -288,7 +277,7 @@ router.get('/admin/list', authenticate, async (req: AuthReq, res) => {
 });
 
 // GET /api/affiliate/admin/commissions
-router.get('/admin/commissions', authenticate, async (req: AuthReq, res) => {
+router.get('/admin/commissions', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
@@ -312,7 +301,7 @@ router.get('/admin/commissions', authenticate, async (req: AuthReq, res) => {
 });
 
 // PUT /api/affiliate/admin/:id/approve
-router.put('/admin/:id/approve', authenticate, async (req: AuthReq, res) => {
+router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
@@ -339,7 +328,7 @@ router.put('/admin/:id/approve', authenticate, async (req: AuthReq, res) => {
 });
 
 // POST /api/affiliate/admin/:id/payout
-router.post('/admin/:id/payout', authenticate, async (req: AuthReq, res) => {
+router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
@@ -389,7 +378,7 @@ router.post('/admin/:id/payout', authenticate, async (req: AuthReq, res) => {
 });
 
 // GET /api/affiliate/admin/affiliate/:id
-router.get('/admin/affiliate/:id', authenticate, async (req: AuthReq, res) => {
+router.get('/admin/affiliate/:id', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
