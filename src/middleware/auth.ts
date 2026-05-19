@@ -35,7 +35,7 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
 
     if (!user) {
       return res.status(401).json({ error: 'User not found' });
-    {
+    }
 
     req.user = {
       userId: user.id,
