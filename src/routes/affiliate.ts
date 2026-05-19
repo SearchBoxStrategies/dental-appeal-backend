@@ -5,7 +5,6 @@ import crypto from 'crypto';
 
 const router = Router();
 
-// Generate unique affiliate code from email
 const generateAffiliateCode = (email: string): string => {
   const prefix = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
   const random = crypto.randomBytes(4).toString('hex');
@@ -13,10 +12,9 @@ const generateAffiliateCode = (email: string): string => {
 };
 
 // ============================================
-// PUBLIC ROUTES (No authentication required)
+// PUBLIC ROUTES
 // ============================================
 
-// POST /api/affiliate/signup
 router.post('/signup', async (req, res) => {
   const { fullName, email, companyName, payoutEmail, payoutMethod } = req.body;
 
@@ -46,7 +44,7 @@ router.post('/signup', async (req, res) => {
     const result = await db.query(
       `INSERT INTO affiliates (full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active)
        VALUES ($1, $2, $3, $4, $5, $6, true)
-       RETURNING id, affiliate_code, created_at`,
+       RETURNING id, affiliate_code`,
       [fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethod || null]
     );
 
@@ -64,7 +62,6 @@ router.post('/signup', async (req, res) => {
   }
 });
 
-// GET /api/affiliate/track/:code
 router.get('/track/:code', async (req, res) => {
   const { code } = req.params;
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
@@ -87,8 +84,6 @@ router.get('/track/:code', async (req, res) => {
         'UPDATE affiliates SET total_clicks = total_clicks + 1 WHERE id = $1',
         [affiliate.rows[0].id]
       );
-      
-      console.log(`📊 Affiliate click tracked: ${code}`);
     }
 
     res.redirect(`${process.env.FRONTEND_URL}/register?ref=${code}`);
@@ -98,7 +93,6 @@ router.get('/track/:code', async (req, res) => {
   }
 });
 
-// GET /api/affiliate/stats/:code
 router.get('/stats/:code', async (req, res) => {
   const { code } = req.params;
 
@@ -122,137 +116,9 @@ router.get('/stats/:code', async (req, res) => {
 });
 
 // ============================================
-// AUTHENTICATED ROUTES
-// ============================================
-
-// GET /api/affiliate/dashboard
-router.get('/dashboard', authenticate, async (req: Request, res) => {
-  try {
-    const userEmail = req.user!.email;
-
-    const affiliate = await db.query(
-      `SELECT id, affiliate_code, tier, commission_rate, total_clicks, total_signups, 
-              total_conversions, total_earnings, pending_earnings, paid_earnings, payout_email,
-              created_at
-       FROM affiliates 
-       WHERE email = $1`,
-      [userEmail]
-    );
-
-    if (affiliate.rows.length === 0) {
-      return res.status(404).json({ error: 'Affiliate not found. Please sign up first.' });
-    }
-
-    const affiliateId = affiliate.rows[0].id;
-
-    const referrals = await db.query(
-      `SELECT ar.*, p.name as practice_name, p.subscription_status
-       FROM affiliate_referrals ar
-       LEFT JOIN practices p ON ar.practice_id = p.id
-       WHERE ar.affiliate_id = $1
-       ORDER BY ar.clicked_at DESC
-       LIMIT 50`,
-      [affiliateId]
-    );
-
-    const commissions = await db.query(
-      `SELECT ac.*, ar.referral_code, p.name as practice_name
-       FROM affiliate_commissions ac
-       JOIN affiliate_referrals ar ON ac.referral_id = ar.id
-       LEFT JOIN practices p ON ar.practice_id = p.id
-       WHERE ar.affiliate_id = $1
-       ORDER BY ac.created_at DESC
-       LIMIT 20`,
-      [affiliateId]
-    );
-
-    const monthlyEarnings = await db.query(
-      `SELECT 
-         TO_CHAR(period_start, 'YYYY-MM') as month,
-         SUM(amount) as total,
-         COUNT(*) as commission_count
-       FROM affiliate_commissions ac
-       JOIN affiliate_referrals ar ON ac.referral_id = ar.id
-       WHERE ar.affiliate_id = $1
-       GROUP BY TO_CHAR(period_start, 'YYYY-MM')
-       ORDER BY month DESC
-       LIMIT 12`,
-      [affiliateId]
-    );
-
-    res.json({
-      affiliate: affiliate.rows[0],
-      referrals: referrals.rows,
-      commissions: commissions.rows,
-      monthlyEarnings: monthlyEarnings.rows
-    });
-  } catch (error) {
-    console.error('Dashboard error:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
-  }
-});
-
-// GET /api/affiliate/link
-router.get('/link', authenticate, async (req: Request, res) => {
-  try {
-    const userEmail = req.user!.email;
-
-    const affiliate = await db.query(
-      'SELECT affiliate_code FROM affiliates WHERE email = $1',
-      [userEmail]
-    );
-
-    if (affiliate.rows.length === 0) {
-      return res.status(404).json({ error: 'Affiliate not found' });
-    }
-
-    const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliate.rows[0].affiliate_code}`;
-    res.json({ affiliateLink });
-  } catch (error) {
-    console.error('Link generation error:', error);
-    res.status(500).json({ error: 'Failed to generate affiliate link' });
-  }
-});
-
-// GET /api/affiliate/earnings
-router.get('/earnings', authenticate, async (req: Request, res) => {
-  try {
-    const userEmail = req.user!.email;
-
-    const affiliate = await db.query(
-      'SELECT id FROM affiliates WHERE email = $1',
-      [userEmail]
-    );
-
-    if (affiliate.rows.length === 0) {
-      return res.status(404).json({ error: 'Affiliate not found' });
-    }
-
-    const affiliateId = affiliate.rows[0].id;
-
-    const earnings = await db.query(
-      `SELECT 
-         COALESCE(SUM(CASE WHEN status = 'pending' THEN amount ELSE 0 END), 0) as pending,
-         COALESCE(SUM(CASE WHEN status = 'paid' THEN amount ELSE 0 END), 0) as paid,
-         COALESCE(SUM(amount), 0) as total
-       FROM affiliate_commissions ac
-       JOIN affiliate_referrals ar ON ac.referral_id = ar.id
-       WHERE ar.affiliate_id = $1`,
-      [affiliateId]
-    );
-
-    res.json(earnings.rows[0]);
-  } catch (error) {
-    console.error('Earnings error:', error);
-    res.status(500).json({ error: 'Failed to fetch earnings' });
-  }
-});
-
-// ============================================
 // ADMIN ROUTES
 // ============================================
 
-// GET /api/affiliate/admin/list
 router.get('/admin/list', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -276,7 +142,6 @@ router.get('/admin/list', authenticate, async (req: Request, res) => {
   }
 });
 
-// GET /api/affiliate/admin/commissions
 router.get('/admin/commissions', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -300,7 +165,6 @@ router.get('/admin/commissions', authenticate, async (req: Request, res) => {
   }
 });
 
-// PUT /api/affiliate/admin/:id/approve
 router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -327,7 +191,6 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   }
 });
 
-// POST /api/affiliate/admin/:id/payout
 router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -368,42 +231,11 @@ router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
 
     res.json({ 
       success: true, 
-      message: `Marked ${pendingCommissions.rows.length} commissions as paid for $${totalAmount.toFixed(2)}`,
-      totalAmount
+      message: `Marked ${pendingCommissions.rows.length} commissions as paid for $${totalAmount.toFixed(2)}`
     });
   } catch (error) {
     console.error('Payout error:', error);
     res.status(500).json({ error: 'Failed to process payout' });
-  }
-});
-
-// GET /api/affiliate/admin/affiliate/:id
-router.get('/admin/affiliate/:id', authenticate, async (req: Request, res) => {
-  try {
-    if (!req.user?.isAdmin) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    const { id } = req.params;
-    const affiliate = await db.query(
-      `SELECT a.*, 
-              COUNT(ar.id) as total_referrals,
-              SUM(CASE WHEN ar.status = 'converted' THEN 1 ELSE 0 END) as total_converted
-       FROM affiliates a
-       LEFT JOIN affiliate_referrals ar ON a.id = ar.affiliate_id
-       WHERE a.id = $1
-       GROUP BY a.id`,
-      [id]
-    );
-
-    if (affiliate.rows.length === 0) {
-      return res.status(404).json({ error: 'Affiliate not found' });
-    }
-
-    res.json(affiliate.rows[0]);
-  } catch (error) {
-    console.error('Failed to fetch affiliate:', error);
-    res.status(500).json({ error: 'Failed to fetch affiliate' });
   }
 });
 
