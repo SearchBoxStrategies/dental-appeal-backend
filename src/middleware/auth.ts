@@ -2,17 +2,22 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { db } from '../db';
 
-export interface AuthRequest extends Request {
-  user?: {
-    userId: number;
-    email: string;
-    isAdmin: boolean;
-    practiceId?: number;
-    role?: string;
-  };
+// Augment the Express Request type
+declare global {
+  namespace Express {
+    interface Request {
+      user?: {
+        userId: number;
+        email: string;
+        isAdmin: boolean;
+        practiceId?: number;
+        role?: string;
+      };
+    }
+  }
 }
 
-export const authenticate = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
