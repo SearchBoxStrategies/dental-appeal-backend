@@ -164,6 +164,9 @@ Generate a complete appeal letter with:
 
 Make it professional, persuasive, and ready to send with minimal editing.`;
 
+   // Start timing BEFORE the API call
+  const startTime = Date.now();
+
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
@@ -171,13 +174,9 @@ Make it professional, persuasive, and ready to send with minimal editing.`;
     messages: [{ role: 'user', content: userPrompt }],
   });
 
-   // === ADD DURATION LOGGING HERE ===
+  // Calculate duration AFTER the API call
   const duration = Date.now() - startTime;
   console.log(`✅ Appeal generated in ${duration}ms using ${model}`);
-
-  const letter = response.content[0]?.type === 'text' ? response.content[0].text : '';
-
-  return { letter, model, promptUsed: userPrompt };
 
   const letter = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
