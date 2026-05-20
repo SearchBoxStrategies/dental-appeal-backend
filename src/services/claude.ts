@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
+import type { Anthropic as AnthropicTypes } from '@anthropic-ai/sdk';
 
 const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
 
@@ -166,7 +167,7 @@ Make it professional, persuasive, and ready to send with minimal editing.`;
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    system: cache_control,
+    system: DENTAL_SYSTEM_PROMPT,
     messages: [{ role: 'user', content: userPrompt }],
   });
 
