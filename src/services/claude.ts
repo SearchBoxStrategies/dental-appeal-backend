@@ -171,6 +171,14 @@ Make it professional, persuasive, and ready to send with minimal editing.`;
     messages: [{ role: 'user', content: userPrompt }],
   });
 
+   // === ADD DURATION LOGGING HERE ===
+  const duration = Date.now() - startTime;
+  console.log(`✅ Appeal generated in ${duration}ms using ${model}`);
+
+  const letter = response.content[0]?.type === 'text' ? response.content[0].text : '';
+
+  return { letter, model, promptUsed: userPrompt };
+
   const letter = response.content[0]?.type === 'text' ? response.content[0].text : '';
 
   return { letter, model, promptUsed: userPrompt };
