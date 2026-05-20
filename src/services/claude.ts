@@ -49,8 +49,8 @@ export async function generateAppealLetter(
   practice: PracticeProfile
 ): Promise<{ letter: string; model: string; promptUsed: string }>
 {
-  const model = 'claude-sonnet-4-6';
-  const maxTokens = 2048;
+  const model = 'claude-haiku-4-5-20251001';
+  const maxTokens = 1500;
 
   // Build practice letterhead
   const practiceAddress = [
@@ -166,7 +166,7 @@ Make it professional, persuasive, and ready to send with minimal editing.`;
   const response = await client.messages.create({
     model,
     max_tokens: maxTokens,
-    system: DENTAL_SYSTEM_PROMPT,
+    system: cache_control,
     messages: [{ role: 'user', content: userPrompt }],
   });
 
