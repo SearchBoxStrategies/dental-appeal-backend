@@ -50,6 +50,9 @@ router.post('/signup', async (req, res) => {
 
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliateCode}`;
 
+    // Send admin notification email (optional - add if you have email service)
+    // await sendNewAffiliateNotification(email, fullName);
+
     res.json({
       success: true,
       affiliateCode: result.rows[0].affiliate_code,
@@ -84,6 +87,15 @@ router.get('/track/:code', async (req, res) => {
         'UPDATE affiliates SET total_clicks = total_clicks + 1 WHERE id = $1',
         [affiliate.rows[0].id]
       );
+
+      // Set 90-day cookie for attribution
+      res.cookie('affiliate_ref', code, {
+        maxAge: 90 * 24 * 60 * 60 * 1000, // 90 days
+        httpOnly: true,
+        secure: true,
+        sameSite: 'lax',
+        path: '/'
+      });
     }
 
     res.redirect(`${process.env.FRONTEND_URL}/register?ref=${code}`);
@@ -93,6 +105,7 @@ router.get('/track/:code', async (req, res) => {
   }
 });
 
+// Basic stats endpoint (public, limited data)
 router.get('/stats/:code', async (req, res) => {
   const { code } = req.params;
 
@@ -112,6 +125,65 @@ router.get('/stats/:code', async (req, res) => {
   } catch (error) {
     console.error('Stats error:', error);
     res.status(500).json({ error: 'Failed to fetch stats' });
+  }
+});
+
+// ============================================
+// PUBLIC STATS PAGE ROUTE (NEW)
+// ============================================
+
+router.get('/public-stats/:code', async (req, res) => {
+  try {
+    const { code } = req.params;
+    
+    const { rows: [affiliate] } = await db.query(
+      `SELECT 
+         affiliate_code,
+         full_name,
+         total_clicks,
+         total_signups,
+         total_conversions,
+         commission_rate,
+         tier,
+         created_at
+       FROM affiliates 
+       WHERE affiliate_code = $1 AND is_active = true`,
+      [code]
+    );
+
+    if (!affiliate) {
+      return res.status(404).json({ error: 'Affiliate not found' });
+    }
+
+    // Calculate estimated earnings (total_conversions * commission_rate * average subscription value)
+    // Assuming $199/month per converted practice
+    const AVG_SUBSCRIPTION_PRICE = 199;
+    const estimatedEarnings = (affiliate.total_conversions || 0) * (affiliate.commission_rate / 100) * AVG_SUBSCRIPTION_PRICE;
+    
+    // Format dates
+    const memberSince = new Date(affiliate.created_at).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'long'
+    });
+
+    res.json({
+      success: true,
+      data: {
+        code: affiliate.affiliate_code,
+        name: affiliate.full_name,
+        memberSince: memberSince,
+        clicks: affiliate.total_clicks || 0,
+        signups: affiliate.total_signups || 0,
+        conversions: affiliate.total_conversions || 0,
+        commissionRate: affiliate.commission_rate || 20,
+        tier: affiliate.tier || 'standard',
+        estimatedEarnings: Math.round(estimatedEarnings),
+        joinLink: `${process.env.FRONTEND_URL}/register?ref=${affiliate.affiliate_code}`
+      }
+    });
+  } catch (error) {
+    console.error('Public stats error:', error);
+    res.status(500).json({ error: 'Failed to fetch affiliate stats' });
   }
 });
 
