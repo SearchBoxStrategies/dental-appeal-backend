@@ -123,13 +123,13 @@ const claimSchema = z.object({
   patientDob: z.string(),
   insuranceCompany: z.string().min(1),
   insuranceCompanyId: z.number().optional(),
-  policyNumber: z.string().optional(),
-  claimNumber: z.string().optional(),
+  policyNumber: z.string().nullable().optional(),  // ← Allow null
+  claimNumber: z.string().nullable().optional(),   // ← Allow null
   procedureCodes: z.array(z.string()).min(1),
   denialReason: z.string().min(1),
   serviceDate: z.string(),
-  amountClaimed: z.number().optional(),
-  amountDenied: z.number().optional(),
+  amountClaimed: z.number().nullable().optional(),
+  amountDenied: z.number().nullable().optional(),
 });
 
 router.post('/', authenticate, async (req, res) => {
