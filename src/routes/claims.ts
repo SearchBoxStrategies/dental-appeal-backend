@@ -70,7 +70,7 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
-// ✅ NEW: Update claim status endpoint
+// Update claim status endpoint
 router.patch('/:id/status', authenticate, async (req, res) => {
   try {
     const claimId = req.params.id;
@@ -91,6 +91,8 @@ router.patch('/:id/status', authenticate, async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
 // Validate claim before generating appeal
 router.post('/:id/validate', authenticate, async (req, res) => {
   try {
@@ -115,7 +117,6 @@ router.post('/:id/validate', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to validate claim' });
   }
 });
-});
 
 const claimSchema = z.object({
   patientName: z.string().min(1),
@@ -135,30 +136,29 @@ router.post('/', authenticate, async (req, res) => {
   try {
     const data = claimSchema.parse(req.body);
 
-// Update the INSERT statement
-const { rows: [claim] } = await db.query(
-  `INSERT INTO claims (
-     practice_id, created_by, patient_name, patient_dob, insurance_company,
-     insurance_company_id, policy_number, claim_number, procedure_codes, 
-     denial_reason, service_date, amount_claimed, amount_denied
-   ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-   RETURNING *`,
-  [
-    req.user!.practiceId,
-    req.user!.userId,
-    data.patientName,
-    data.patientDob,
-    data.insuranceCompany,
-    data.insuranceCompanyId ?? null,
-    data.policyNumber ?? null,
-    data.claimNumber ?? null,
-    data.procedureCodes,
-    data.denialReason,
-    data.serviceDate,
-    data.amountClaimed ?? null,
-    data.amountDenied ?? null,
-  ]
-);
+    const { rows: [claim] } = await db.query(
+      `INSERT INTO claims (
+         practice_id, created_by, patient_name, patient_dob, insurance_company,
+         insurance_company_id, policy_number, claim_number, procedure_codes, 
+         denial_reason, service_date, amount_claimed, amount_denied
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING *`,
+      [
+        req.user!.practiceId,
+        req.user!.userId,
+        data.patientName,
+        data.patientDob,
+        data.insuranceCompany,
+        data.insuranceCompanyId ?? null,
+        data.policyNumber ?? null,
+        data.claimNumber ?? null,
+        data.procedureCodes,
+        data.denialReason,
+        data.serviceDate,
+        data.amountClaimed ?? null,
+        data.amountDenied ?? null,
+      ]
+    );
 
     res.status(201).json(claim);
   } catch (error) {
