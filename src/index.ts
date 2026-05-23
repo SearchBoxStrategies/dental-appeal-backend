@@ -16,6 +16,7 @@ import practiceRouter from './routes/practice';
 import insuranceRouter from './routes/insurance';
 import affiliateRouter from './routes/affiliate';
 import adminEmailTemplatesRouter from './routes/adminEmailTemplates';
+import calculatorRouter from './routes/calculator';
 
 const app = express();
 console.log('✅ Backend starting up...');
@@ -49,6 +50,7 @@ app.use('/api/practice', practiceRouter);
 app.use('/api/insurance', insuranceRouter);
 app.use('/api/affiliate', affiliateRouter);
 app.use('/api', adminEmailTemplatesRouter);
+app.use('/api', calculatorRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
