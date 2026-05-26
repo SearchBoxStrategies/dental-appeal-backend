@@ -1,6 +1,6 @@
 import express, { Request, Response } from 'express';
 import Stripe from 'stripe';
-import { getAffiliateTier, getAffiliateTierByPractice } from '../utils/affiliateTiers';
+import { getAffiliateTier, getAffiliateTierByPractice, updateAffiliateTierColumn } from '../utils/affiliateTiers';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -24,10 +24,10 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
       return;
     }
     
-    // Get the affiliate's current tier based on their referral count
+    // Get the affiliate's current tier based on their conversion count
     const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
     
-    console.log(`Affiliate ${practice.referred_by_affiliate_id} is in ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} total referrals`);
+    console.log(`Affiliate ${practice.referred_by_affiliate_id} is in ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} conversions`);
     
     // Get the referral record
     const { rows: [referral] } = await db.query(
@@ -67,7 +67,7 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
       [referral.id, commissionAmount, periodStart, periodEnd]
     );
     
-    // Update affiliate earnings totals
+    // Update affiliate earnings and conversion count
     await db.query(
       `UPDATE affiliates 
        SET total_conversions = total_conversions + 1,
@@ -76,6 +76,9 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
        WHERE id = $2`,
       [commissionAmount, practice.referred_by_affiliate_id]
     );
+    
+    // 🆕 Update the tier column to match new conversion count
+    await updateAffiliateTierColumn(practice.referred_by_affiliate_id);
     
     console.log(`✅ Created affiliate commission: $${commissionAmount.toFixed(2)} (${tier.rate}% ${tier.name} tier) for referral ${referral.id} (Practice: ${practiceId})`);
     
@@ -97,7 +100,7 @@ async function createRecurringAffiliateCommission(practiceId: number, invoice: S
       return;
     }
     
-    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} total referrals`);
+    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} total conversions`);
     
     // Check if commission already created for this month
     const { rows: [existingCommission] } = await db.query(
@@ -212,7 +215,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
       console.log(`   PracticeId: ${session.metadata?.practiceId}`);
       console.log(`   Customer: ${session.customer}`);
       
-      // Update the database
       try {
         const { db } = await import('../db');
         await db.query(
@@ -225,8 +227,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
         );
         console.log(`✅ Updated practice ${session.metadata?.practiceId} to active`);
         
-        // CREATE AFFILIATE COMMISSION ON FIRST PAYMENT (using dynamic tier)
-        const amountTotal = session.amount_total || 19900; // $199 in cents default
+        const amountTotal = session.amount_total || 19900;
         await createAffiliateCommission(
           parseInt(session.metadata?.practiceId),
           session.subscription as string,
@@ -248,15 +249,12 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
         try {
           const { db } = await import('../db');
           
-          // Find practice by stripe_customer_id
           const { rows: [practice] } = await db.query(
             'SELECT id FROM practices WHERE stripe_customer_id = $1',
             [invoice.customer]
           );
           
           if (practice) {
-            // CREATE RECURRING COMMISSION (only if this is not the first payment)
-            // Check if this practice already has a converted referral (meaning first payment already processed)
             const { rows: [existingReferral] } = await db.query(
               `SELECT id FROM affiliate_referrals 
                WHERE practice_id = $1 AND status = 'converted'`,
@@ -266,7 +264,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
             if (existingReferral) {
               await createRecurringAffiliateCommission(practice.id, invoice);
             } else {
-              console.log(`Practice ${practice.id} has no converted referral yet - skipping recurring commission (first payment handled by checkout.session.completed)`);
+              console.log(`Practice ${practice.id} has no converted referral yet - skipping recurring commission`);
             }
           }
         } catch (error) {
@@ -278,7 +276,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
     case 'customer.subscription.deleted':
       const subscription = event.data.object as Stripe.Subscription;
       console.log(`❌ Subscription cancelled: ${subscription.id}`);
-      console.log(`   Customer: ${subscription.customer}`);
       try {
         await updatePracticeStatus(subscription.customer as string, 'cancelled');
       } catch (dbError) {
@@ -290,9 +287,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
       const updatedSubscription = event.data.object as Stripe.Subscription;
       console.log(`📝 Subscription updated: ${updatedSubscription.id}`);
       console.log(`   Status: ${updatedSubscription.status}`);
-      console.log(`   Customer: ${updatedSubscription.customer}`);
       
-      // Handle status changes (past_due, unpaid, etc.)
       if (updatedSubscription.status === 'past_due') {
         await updatePracticeStatus(updatedSubscription.customer as string, 'past_due');
       } else if (updatedSubscription.status === 'active') {
@@ -303,9 +298,6 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
     case 'invoice.payment_failed':
       const failedInvoice = event.data.object as Stripe.Invoice;
       console.log(`⚠️ Payment failed for invoice: ${failedInvoice.id}`);
-      console.log(`   Customer: ${failedInvoice.customer}`);
-      
-      // Optionally update practice status to 'past_due'
       if (failedInvoice.customer) {
         await updatePracticeStatus(failedInvoice.customer as string, 'past_due');
       }
