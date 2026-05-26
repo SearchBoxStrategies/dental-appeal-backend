@@ -12,20 +12,16 @@ export interface AffiliateTierWithId extends AffiliateTier {
 }
 
 /**
- * Get affiliate tier based on number of successfully referred practices
+ * Get affiliate tier based on number of successful conversions
+ * Uses total_conversions from the affiliates table
  */
 export async function getAffiliateTier(affiliateId: number): Promise<AffiliateTier> {
-  // Count how many practices this affiliate has successfully converted
-  const { rows: [countResult] } = await db.query(
-    `SELECT COUNT(DISTINCT ar.practice_id) as referral_count
-     FROM affiliate_referrals ar
-     WHERE ar.affiliate_id = $1 
-       AND ar.status = 'converted'
-       AND ar.practice_id IS NOT NULL`,
+  const { rows: [affiliate] } = await db.query(
+    `SELECT total_conversions FROM affiliates WHERE id = $1`,
     [affiliateId]
   );
   
-  const referralCount = parseInt(countResult?.referral_count || '0');
+  const referralCount = affiliate?.total_conversions || 0;
   
   // Your 3-tier logic
   if (referralCount >= 50) {
@@ -41,21 +37,52 @@ export async function getAffiliateTier(affiliateId: number): Promise<AffiliateTi
  * Get affiliate tier for a specific practice (based on who referred them)
  */
 export async function getAffiliateTierByPractice(practiceId: number): Promise<AffiliateTierWithId | null> {
-  const { rows: [referral] } = await db.query(
-    `SELECT a.id as affiliate_id
-     FROM affiliate_referrals ar
-     JOIN affiliates a ON ar.affiliate_id = a.id
-     WHERE ar.practice_id = $1 AND ar.status = 'converted'`,
+  const { rows: [practice] } = await db.query(
+    `SELECT referred_by_affiliate_id 
+     FROM practices 
+     WHERE id = $1 AND referred_by_affiliate_id IS NOT NULL`,
     [practiceId]
   );
   
-  if (!referral) {
+  if (!practice?.referred_by_affiliate_id) {
     return null;
   }
   
-  const tier = await getAffiliateTier(referral.affiliate_id);
+  const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
   return {
     ...tier,
-    affiliateId: referral.affiliate_id
+    affiliateId: practice.referred_by_affiliate_id
   };
+}
+
+/**
+ * Update the affiliate's tier and commission_rate columns to match their current tier
+ */
+export async function updateAffiliateTierColumn(affiliateId: number): Promise<void> {
+  const tier = await getAffiliateTier(affiliateId);
+  
+  await db.query(
+    `UPDATE affiliates 
+     SET tier = $1, commission_rate = $2
+     WHERE id = $3`,
+    [tier.name, tier.rate, affiliateId]
+  );
+  
+  console.log(`✅ Updated affiliate ${affiliateId} to ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} conversions`);
+}
+
+/**
+ * Fix all affiliates - recalculate and update their tiers based on actual conversions
+ * Run this once after deploying to fix any incorrect tiers
+ */
+export async function fixAllAffiliateTiers(): Promise<void> {
+  const { rows: affiliates } = await db.query(
+    `SELECT id FROM affiliates`
+  );
+  
+  for (const affiliate of affiliates) {
+    await updateAffiliateTierColumn(affiliate.id);
+  }
+  
+  console.log(`✅ Fixed tiers for ${affiliates.length} affiliates`);
 }
