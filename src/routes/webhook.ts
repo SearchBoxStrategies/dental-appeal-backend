@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import Stripe from 'stripe';
+import { getAffiliateTier, getAffiliateTierByPractice } from '../utils/affiliateTiers';
 
 const router = express.Router();
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
@@ -23,11 +24,15 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
       return;
     }
     
-    // Get the referral record and affiliate commission rate
+    // Get the affiliate's current tier based on their referral count
+    const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
+    
+    console.log(`Affiliate ${practice.referred_by_affiliate_id} is in ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} total referrals`);
+    
+    // Get the referral record
     const { rows: [referral] } = await db.query(
-      `SELECT ar.id, a.commission_rate, a.id as affiliate_id
+      `SELECT ar.id
        FROM affiliate_referrals ar
-       JOIN affiliates a ON ar.affiliate_id = a.id
        WHERE ar.referral_code = $1 AND ar.practice_id IS NULL`,
       [practice.referral_code_used]
     );
@@ -45,8 +50,8 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
       [practiceId, subscriptionId, referral.id]
     );
     
-    // Calculate commission (amount is in cents, commission_rate is percentage)
-    const commissionAmount = (amount / 100) * (referral.commission_rate / 100);
+    // Calculate commission using dynamic tier rate
+    const commissionAmount = (amount / 100) * (tier.rate / 100);
     
     // Set period start/end for this month
     const periodStart = new Date();
@@ -69,10 +74,10 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
            total_earnings = total_earnings + $1,
            pending_earnings = pending_earnings + $1
        WHERE id = $2`,
-      [commissionAmount, referral.affiliate_id]
+      [commissionAmount, practice.referred_by_affiliate_id]
     );
     
-    console.log(`✅ Created affiliate commission: $${commissionAmount.toFixed(2)} for referral ${referral.id} (Practice: ${practiceId})`);
+    console.log(`✅ Created affiliate commission: $${commissionAmount.toFixed(2)} (${tier.rate}% ${tier.name} tier) for referral ${referral.id} (Practice: ${practiceId})`);
     
   } catch (error) {
     console.error('❌ Failed to create affiliate commission:', error);
@@ -84,41 +89,51 @@ async function createRecurringAffiliateCommission(practiceId: number, invoice: S
   try {
     const { db } = await import('../db');
     
-    // Find the affiliate referral for this practice
-    const { rows: [referral] } = await db.query(
-      `SELECT ar.id, a.commission_rate, a.id as affiliate_id
-       FROM affiliate_referrals ar
-       JOIN affiliates a ON ar.affiliate_id = a.id
-       WHERE ar.practice_id = $1 AND ar.status = 'converted'`,
-      [practiceId]
-    );
+    // Get the affiliate tier for this practice
+    const tierInfo = await getAffiliateTierByPractice(practiceId);
     
-    if (!referral) {
+    if (!tierInfo) {
       console.log(`Practice ${practiceId} has no affiliate referral - no recurring commission`);
       return;
     }
     
+    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} total referrals`);
+    
     // Check if commission already created for this month
     const { rows: [existingCommission] } = await db.query(
-      `SELECT id FROM affiliate_commissions 
-       WHERE referral_id = $1 
-       AND date_trunc('month', period_start) = date_trunc('month', NOW())`,
-      [referral.id]
+      `SELECT c.id 
+       FROM affiliate_commissions c
+       JOIN affiliate_referrals r ON c.referral_id = r.id
+       WHERE r.practice_id = $1 
+       AND date_trunc('month', c.period_start) = date_trunc('month', NOW())`,
+      [practiceId]
     );
     
     if (existingCommission) {
-      console.log(`Commission already exists for referral ${referral.id} this month - skipping`);
+      console.log(`Commission already exists for practice ${practiceId} this month - skipping`);
       return;
     }
     
     const amount = invoice.amount_paid;
-    const commissionAmount = (amount / 100) * (referral.commission_rate / 100);
+    const commissionAmount = (amount / 100) * (tierInfo.rate / 100);
     
     const periodStart = new Date();
     periodStart.setDate(1);
     const periodEnd = new Date();
     periodEnd.setMonth(periodEnd.getMonth() + 1);
     periodEnd.setDate(0);
+    
+    // Get the referral ID for this practice
+    const { rows: [referral] } = await db.query(
+      `SELECT id FROM affiliate_referrals 
+       WHERE practice_id = $1 AND status = 'converted'`,
+      [practiceId]
+    );
+    
+    if (!referral) {
+      console.log(`No referral found for practice ${practiceId}`);
+      return;
+    }
     
     await db.query(
       `INSERT INTO affiliate_commissions (referral_id, amount, period_start, period_end, status)
@@ -132,10 +147,10 @@ async function createRecurringAffiliateCommission(practiceId: number, invoice: S
        SET total_earnings = total_earnings + $1,
            pending_earnings = pending_earnings + $1
        WHERE id = $2`,
-      [commissionAmount, referral.affiliate_id]
+      [commissionAmount, tierInfo.affiliateId]
     );
     
-    console.log(`✅ Created recurring commission: $${commissionAmount.toFixed(2)} for practice ${practiceId}`);
+    console.log(`✅ Created recurring commission: $${commissionAmount.toFixed(2)} (${tierInfo.rate}% ${tierInfo.name} tier) for practice ${practiceId}`);
     
   } catch (error) {
     console.error('❌ Failed to create recurring commission:', error);
@@ -210,7 +225,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
         );
         console.log(`✅ Updated practice ${session.metadata?.practiceId} to active`);
         
-        // 🆕 CREATE AFFILIATE COMMISSION ON FIRST PAYMENT
+        // CREATE AFFILIATE COMMISSION ON FIRST PAYMENT (using dynamic tier)
         const amountTotal = session.amount_total || 19900; // $199 in cents default
         await createAffiliateCommission(
           parseInt(session.metadata?.practiceId),
@@ -240,7 +255,7 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
           );
           
           if (practice) {
-            // 🆕 CREATE RECURRING COMMISSION (only if this is not the first payment)
+            // CREATE RECURRING COMMISSION (only if this is not the first payment)
             // Check if this practice already has a converted referral (meaning first payment already processed)
             const { rows: [existingReferral] } = await db.query(
               `SELECT id FROM affiliate_referrals 
