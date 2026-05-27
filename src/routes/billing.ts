@@ -33,6 +33,7 @@ router.post('/checkout', authenticate, async (req, res) => {
   try {
     const practiceId = req.user!.practiceId;
     const userId = req.user!.userId;
+    const { referralCode } = req.body; // ADDED - get referral code from request body
     const priceId = process.env.STRIPE_PRICE_ID!;
     
     const { rows: [practice] } = await db.query(
@@ -49,6 +50,7 @@ router.post('/checkout', authenticate, async (req, res) => {
       cancelUrl: `${frontendUrl}/billing?canceled=true`,
       userId,
       practiceId,
+      referralCode, // ADDED - pass referral code to Stripe
     });
     
     res.json({ url: session.url });
