@@ -11,10 +11,11 @@ export interface CreateCheckoutSessionParams {
   cancelUrl: string;
   userId: number;
   practiceId: number;
+  referralCode?: string; // ADDED
 }
 
 export const createCheckoutSession = async (params: CreateCheckoutSessionParams) => {
-  const { customerId, priceId, successUrl, cancelUrl, userId, practiceId } = params;
+  const { customerId, priceId, successUrl, cancelUrl, userId, practiceId, referralCode } = params;
 
   try {
     let customer = customerId;
@@ -50,11 +51,13 @@ export const createCheckoutSession = async (params: CreateCheckoutSessionParams)
       metadata: {
         userId: userId.toString(),
         practiceId: practiceId.toString(),
+        referralCode: referralCode || '', // ADDED
       },
       subscription_data: {
         metadata: {
           userId: userId.toString(),
           practiceId: practiceId.toString(),
+          referralCode: referralCode || '', // ADDED
         },
       },
     });
@@ -77,81 +80,6 @@ export const createCustomerPortalSession = async (customerId: string, returnUrl:
     console.error('Stripe portal error:', error);
     throw error;
   }
-};
-
-export const handleWebhookEvent = async (event: Stripe.Event) => {
-  const { db } = await import('../db');
-  
-  switch (event.type) {
-    case 'checkout.session.completed': {
-      const session = event.data.object as Stripe.Checkout.Session;
-      const userId = session.metadata?.userId;
-      const practiceId = session.metadata?.practiceId;
-      const subscriptionId = session.subscription as string;
-      
-      if (userId && practiceId) {
-        await db.query(
-          `UPDATE practices 
-           SET subscription_status = 'active', 
-               stripe_subscription_id = $1 
-           WHERE id = $2`,
-          [subscriptionId, practiceId]
-        );
-      }
-      break;
-    }
-    
-    case 'customer.subscription.updated': {
-      const subscription = event.data.object as Stripe.Subscription;
-      const practiceId = subscription.metadata?.practiceId;
-      const status = subscription.status;
-      
-      if (practiceId) {
-        await db.query(
-          'UPDATE practices SET subscription_status = $1 WHERE id = $2',
-          [status === 'active' ? 'active' : status, practiceId]
-        );
-      }
-      break;
-    }
-    
-    case 'customer.subscription.deleted': {
-      const subscription = event.data.object as Stripe.Subscription;
-      const practiceId = subscription.metadata?.practiceId;
-      
-      if (practiceId) {
-        await db.query(
-          'UPDATE practices SET subscription_status = $1 WHERE id = $2',
-          ['cancelled', practiceId]
-        );
-      }
-      break;
-    }
-    
-    case 'invoice.payment_succeeded': {
-      const invoice = event.data.object as Stripe.Invoice;
-      const subscription = await stripe.subscriptions.retrieve(invoice.subscription as string);
-      const practiceId = subscription.metadata?.practiceId;
-      const amountPaid = invoice.amount_paid / 100;
-      
-      if (practiceId) {
-        await db.query(
-          `UPDATE practices 
-           SET total_paid = COALESCE(total_paid, 0) + $1,
-               last_payment_date = NOW(),
-               last_payment_amount = $1
-           WHERE id = $2`,
-          [amountPaid, practiceId]
-        );
-      }
-      break;
-    }
-    
-    default:
-      console.log(`Unhandled event type: ${event.type}`);
-  }
-  
-  return { received: true };
 };
 
 export default stripe;
