@@ -31,7 +31,7 @@ app.use(cors({
 }));
 
 // Stripe webhook requires raw body — must be registered before express.json()
-app.use('/api/webhook', express.raw({ type: 'application/json' }), webhookRouter);
+app.use('/api/webhook', webhookRouter);
 
 app.use(express.json());
 
