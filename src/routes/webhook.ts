@@ -244,7 +244,28 @@ router.post('/stripe', express.raw({ type: 'application/json' }), async (req: Re
         );
         console.log(`✅ Updated practice ${session.metadata?.practiceId} to active`);
         
-        await createAffiliateCommission(
+       case 'checkout.session.completed':
+  const session = event.data.object as Stripe.Checkout.Session;
+  
+  // ADD THIS - Get referral code from metadata
+  const referralCode = session.metadata?.referralCode;
+  const practiceId = session.metadata?.practiceId;
+  
+  if (referralCode && practiceId) {
+    await db.query(
+      `UPDATE practices 
+       SET referral_code_used = $1,
+           referred_by_affiliate_id = (
+             SELECT affiliate_id FROM affiliate_referrals 
+             WHERE referral_code = $1 LIMIT 1
+           )
+       WHERE id = $2`,
+      [referralCode, practiceId]
+    );
+  }
+  
+       
+       await createAffiliateCommission(
           parseInt(session.metadata?.practiceId),
           session.subscription as string,
           amountTotal
