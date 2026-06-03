@@ -221,7 +221,6 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       try {
         const { db } = await import('../db');
         
-        // Update practice with referral code if present
         const referralCode = session.metadata?.referralCode;
         const practiceId = session.metadata?.practiceId;
         
@@ -329,10 +328,6 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       break;
     }
     
-    // ============================================
-    // STRIPE CONNECT WEBHOOK EVENTS
-    // ============================================
-    
     case 'account.updated': {
       const account = event.data.object as Stripe.Account;
       const affiliateId = account.metadata?.affiliateId;
@@ -351,24 +346,6 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
         
         console.log(`✅ Updated affiliate ${affiliateId} Connect status to ${isActive ? 'verified' : 'pending'}`);
       }
-      break;
-    }
-    
-    case 'payout.paid': {
-      const payout = event.data.object as Stripe.Payout;
-      console.log(`💰 Payout completed: ${payout.id}`);
-      console.log(`   Amount: $${(payout.amount / 100).toFixed(2)}`);
-      console.log(`   Status: ${payout.status}`);
-      // Optionally update a payout tracking table here
-      break;
-    }
-    
-    case 'payout.failed': {
-      const failedPayout = event.data.object as Stripe.Payout;
-      console.error(`❌ Payout failed: ${failedPayout.id}`);
-      console.error(`   Amount: $${(failedPayout.amount / 100).toFixed(2)}`);
-      console.error(`   Failure message: ${failedPayout.failure_message || 'Unknown reason'}`);
-      // Optionally notify admin or update affiliate record
       break;
     }
       
