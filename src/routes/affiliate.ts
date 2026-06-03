@@ -2,6 +2,7 @@ import { Router, Request } from 'express';
 import { db } from '../db';
 import { authenticate } from '../middleware/auth';
 import crypto from 'crypto';
+import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
 
 const router = Router();
 
@@ -49,9 +50,6 @@ router.post('/signup', async (req, res) => {
     );
 
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliateCode}`;
-
-    // Send admin notification email (optional - add if you have email service)
-    // await sendNewAffiliateNotification(email, fullName);
 
     res.json({
       success: true,
@@ -129,7 +127,7 @@ router.get('/stats/:code', async (req, res) => {
 });
 
 // ============================================
-// PUBLIC STATS PAGE ROUTE (NEW)
+// PUBLIC STATS PAGE ROUTE
 // ============================================
 
 router.get('/public-stats/:code', async (req, res) => {
@@ -184,6 +182,223 @@ router.get('/public-stats/:code', async (req, res) => {
   } catch (error) {
     console.error('Public stats error:', error);
     res.status(500).json({ error: 'Failed to fetch affiliate stats' });
+  }
+});
+
+// ============================================
+// AFFILIATE DASHBOARD ROUTES (Authenticated)
+// ============================================
+
+router.get('/dashboard', authenticate, async (req: Request, res) => {
+  try {
+    const userId = req.user!.userId;
+    
+    // Get affiliate info
+    const { rows: [affiliate] } = await db.query(
+      `SELECT id, affiliate_code, tier, commission_rate, total_clicks, total_signups, 
+              total_conversions, total_earnings, pending_earnings, paid_earnings, 
+              payout_email, payout_method, created_at, stripe_account_id, stripe_account_status, auto_payout_enabled
+       FROM affiliates WHERE user_id = $1`,
+      [userId]
+    );
+    
+    if (!affiliate) {
+      return res.status(404).json({ error: 'Affiliate not found' });
+    }
+    
+    // Get recent referrals
+    const { rows: referrals } = await db.query(
+      `SELECT id, referral_code, status, clicked_at, signed_up_at, converted_at, practice_id
+       FROM affiliate_referrals 
+       WHERE affiliate_id = $1 
+       ORDER BY clicked_at DESC 
+       LIMIT 50`,
+      [affiliate.id]
+    );
+    
+    // Get recent commissions
+    const { rows: commissions } = await db.query(
+      `SELECT ac.id, ac.amount, ac.period_start, ac.period_end, ac.status, ac.paid_at, ac.created_at,
+              p.name as practice_name
+       FROM affiliate_commissions ac
+       JOIN affiliate_referrals ar ON ac.referral_id = ar.id
+       LEFT JOIN practices p ON ar.practice_id = p.id
+       WHERE ar.affiliate_id = $1 
+       ORDER BY ac.created_at DESC 
+       LIMIT 50`,
+      [affiliate.id]
+    );
+    
+    // Get monthly earnings summary
+    const { rows: monthlyEarnings } = await db.query(
+      `SELECT DATE_TRUNC('month', ac.created_at) as month, 
+              SUM(ac.amount) as total,
+              COUNT(ac.id) as commission_count
+       FROM affiliate_commissions ac
+       JOIN affiliate_referrals ar ON ac.referral_id = ar.id
+       WHERE ar.affiliate_id = $1 AND ac.status = 'paid'
+       GROUP BY DATE_TRUNC('month', ac.created_at)
+       ORDER BY month DESC
+       LIMIT 12`,
+      [affiliate.id]
+    );
+    
+    res.json({
+      affiliate,
+      referrals,
+      commissions,
+      monthlyEarnings
+    });
+  } catch (error) {
+    console.error('Dashboard error:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
+
+router.get('/link', authenticate, async (req: Request, res) => {
+  try {
+    const userId = req.user!.userId;
+    
+    const { rows: [affiliate] } = await db.query(
+      'SELECT affiliate_code FROM affiliates WHERE user_id = $1',
+      [userId]
+    );
+    
+    if (!affiliate) {
+      return res.status(404).json({ error: 'Affiliate not found' });
+    }
+    
+    const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliate.affiliate_code}`;
+    
+    res.json({ affiliateLink });
+  } catch (error) {
+    console.error('Link error:', error);
+    res.status(500).json({ error: 'Failed to fetch affiliate link' });
+  }
+});
+
+// ============================================
+// STRIPE CONNECT ROUTES
+// ============================================
+
+// Create or get Stripe Connect account for affiliate
+router.post('/connect/setup', authenticate, async (req: Request, res) => {
+  try {
+    const userId = req.user!.userId;
+    
+    // Get affiliate by user_id
+    const { rows: [affiliate] } = await db.query(
+      'SELECT id, email, full_name, stripe_account_id, stripe_account_status FROM affiliates WHERE user_id = $1',
+      [userId]
+    );
+    
+    if (!affiliate) {
+      return res.status(404).json({ error: 'Affiliate account not found' });
+    }
+    
+    let stripeAccountId = affiliate.stripe_account_id;
+    
+    // If no Stripe account exists, create one
+    if (!stripeAccountId) {
+      const account = await createConnectAccount(affiliate.id, affiliate.email, affiliate.full_name);
+      stripeAccountId = account.id;
+      
+      await db.query(
+        'UPDATE affiliates SET stripe_account_id = $1 WHERE id = $2',
+        [stripeAccountId, affiliate.id]
+      );
+    }
+    
+    // Create onboarding link
+    const accountLink = await createAccountOnboardingLink(stripeAccountId);
+    
+    res.json({
+      success: true,
+      url: accountLink.url,
+      accountStatus: affiliate.stripe_account_status,
+    });
+  } catch (error) {
+    console.error('Connect setup error:', error);
+    res.status(500).json({ error: 'Failed to setup Stripe Connect' });
+  }
+});
+
+// Get Connect account status
+router.get('/connect/status', authenticate, async (req: Request, res) => {
+  try {
+    const userId = req.user!.userId;
+    
+    const { rows: [affiliate] } = await db.query(
+      'SELECT stripe_account_id, stripe_account_status, auto_payout_enabled FROM affiliates WHERE user_id = $1',
+      [userId]
+    );
+    
+    if (!affiliate || !affiliate.stripe_account_id) {
+      return res.json({ hasAccount: false, status: null });
+    }
+    
+    const status = await getAccountStatus(affiliate.stripe_account_id);
+    
+    res.json({
+      hasAccount: true,
+      status: affiliate.stripe_account_status,
+      details_submitted: status?.details_submitted,
+      payouts_enabled: status?.payouts_enabled,
+      auto_payout_enabled: affiliate.auto_payout_enabled,
+    });
+  } catch (error) {
+    console.error('Connect status error:', error);
+    res.status(500).json({ error: 'Failed to get Connect status' });
+  }
+});
+
+// Create login link for affiliate to manage their Stripe account
+router.post('/connect/login', authenticate, async (req: Request, res) => {
+  try {
+    const userId = req.user!.userId;
+    
+    const { rows: [affiliate] } = await db.query(
+      'SELECT stripe_account_id FROM affiliates WHERE user_id = $1',
+      [userId]
+    );
+    
+    if (!affiliate?.stripe_account_id) {
+      return res.status(404).json({ error: 'No Stripe account found' });
+    }
+    
+    const loginLink = await createAccountLoginLink(affiliate.stripe_account_id);
+    
+    res.json({ url: loginLink.url });
+  } catch (error) {
+    console.error('Connect login error:', error);
+    res.status(500).json({ error: 'Failed to create login link' });
+  }
+});
+
+// Toggle auto-payout (affiliate can enable/disable)
+router.post('/connect/auto-payout', authenticate, async (req: Request, res) => {
+  try {
+    const userId = req.user!.userId;
+    const { enabled } = req.body;
+    
+    const { rows: [affiliate] } = await db.query(
+      'SELECT stripe_account_id FROM affiliates WHERE user_id = $1',
+      [userId]
+    );
+    
+    if (!affiliate?.stripe_account_id) {
+      return res.status(404).json({ error: 'No Stripe account found' });
+    }
+    
+    await db.query(
+      'UPDATE affiliates SET auto_payout_enabled = $1 WHERE user_id = $2',
+      [enabled, userId]
+    );
+    
+    res.json({ success: true, auto_payout_enabled: enabled });
+  } catch (error) {
+    console.error('Toggle auto-payout error:', error);
+    res.status(500).json({ error: 'Failed to update auto-payout setting' });
   }
 });
 
@@ -263,6 +478,7 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   }
 });
 
+// Manual payout endpoint (kept for admin override)
 router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
