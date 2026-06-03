@@ -100,45 +100,4 @@ export async function transferToAffiliate(affiliateStripeAccountId: string, amou
   }
 }
 
-// Webhook handler for Connect account updates
-export async function handleConnectWebhook(event: Stripe.Event) {
-  const { db } = await import('../db');
-  
-  switch (event.type) {
-    case 'account.updated': {
-      const account = event.data.object as Stripe.Account;
-      const affiliateId = account.metadata?.affiliateId;
-      
-      if (affiliateId) {
-        const isActive = account.charges_enabled && account.payouts_enabled;
-        await db.query(
-          `UPDATE affiliates 
-           SET stripe_account_status = $1,
-               stripe_onboarded_at = CASE WHEN $1 = 'verified' AND stripe_onboarded_at IS NULL THEN NOW() ELSE stripe_onboarded_at END,
-               auto_payout_enabled = $2
-           WHERE id = $3`,
-          [isActive ? 'verified' : 'pending', isActive, affiliateId]
-        );
-        
-        console.log(`Updated affiliate ${affiliateId} Connect status to ${isActive ? 'verified' : 'pending'}`);
-      }
-      break;
-    }
-    
-    case 'transfer.created':
-      console.log(`Transfer created: ${event.data.object.id}`);
-      break;
-      
-    case 'transfer.paid':
-      console.log(`Transfer paid: ${event.data.object.id}`);
-      break;
-      
-    case 'transfer.failed':
-      console.error(`Transfer failed: ${event.data.object.id}`);
-      break;
-  }
-  
-  return { received: true };
-}
-
 export default stripe;
