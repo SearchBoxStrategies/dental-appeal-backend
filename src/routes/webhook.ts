@@ -156,7 +156,30 @@ async function createRecurringAffiliateCommission(practiceId: number, invoice: S
     console.error('❌ Failed to create recurring commission:', error);
   }
 }
-
+// Add these cases to your webhook switch statement
+case 'account.updated':
+  const account = event.data.object as Stripe.Account;
+  const affiliateId = account.metadata?.affiliateId;
+  
+  if (affiliateId) {
+    const isActive = account.charges_enabled && account.payouts_enabled;
+    await db.query(
+      `UPDATE affiliates 
+       SET stripe_account_status = $1,
+           stripe_onboarded_at = CASE WHEN $2 THEN NOW() ELSE stripe_onboarded_at END
+       WHERE id = $3`,
+      [isActive ? 'verified' : 'pending', isActive, affiliateId]
+    );
+  }
+  break;
+  
+case 'transfer.paid':
+  console.log(`💰 Transfer completed: ${event.data.object.id}`);
+  break;
+  
+case 'transfer.failed':
+  console.error(`❌ Transfer failed: ${event.data.object.id}`);
+  break;
 // Helper: Update practice subscription status
 async function updatePracticeStatus(customerId: string, status: string, subscriptionId?: string) {
   try {
