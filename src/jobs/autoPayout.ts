@@ -6,7 +6,12 @@ import { transferToAffiliate } from '../services/stripeConnect';
 export async function processAutoPayouts() {
   console.log('🔄 Starting auto-payout process...');
   
-  // Verify Stripe key is loaded
+  // Verify environment variables are loaded
+  if (!process.env.DATABASE_URL) {
+    console.error('❌ DATABASE_URL is not set in environment');
+    return;
+  }
+  
   if (!process.env.STRIPE_SECRET_KEY) {
     console.error('❌ STRIPE_SECRET_KEY is not set in environment');
     return;
