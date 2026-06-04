@@ -1,9 +1,16 @@
+import 'dotenv/config';
 import { db } from '../db';
 import { transferToAffiliate } from '../services/stripeConnect';
 
 // Run this on a schedule (e.g., 15th of each month at 9am)
 export async function processAutoPayouts() {
   console.log('🔄 Starting auto-payout process...');
+  
+  // Verify Stripe key is loaded
+  if (!process.env.STRIPE_SECRET_KEY) {
+    console.error('❌ STRIPE_SECRET_KEY is not set in environment');
+    return;
+  }
   
   try {
     // Get all affiliates with verified Stripe accounts and auto-payout enabled
@@ -66,7 +73,7 @@ export async function processAutoPayouts() {
             [amount, affiliate.id]
           );
           
-          console.log(`✅ Paid ${amount} to affiliate ${affiliate.id} (Transfer: ${transfer.id})`);
+          console.log(`✅ Paid $${amount.toFixed(2)} to affiliate ${affiliate.id} (Transfer: ${transfer.id})`);
         }
         
       } catch (error) {
@@ -81,15 +88,7 @@ export async function processAutoPayouts() {
   }
 }
 
-// Function to get pending payout amount for an affiliate
-export async function getPendingPayoutAmount(affiliateId: number) {
-  const { rows: [result] } = await db.query(
-    `SELECT SUM(ac.amount) as total
-     FROM affiliate_commissions ac
-     JOIN affiliate_referrals ar ON ac.referral_id = ar.id
-     WHERE ar.affiliate_id = $1 AND ac.status = 'pending'`,
-    [affiliateId]
-  );
-  
-  return result?.total ? parseFloat(result.total) : 0;
+// Run if called directly
+if (require.main === module) {
+  processAutoPayouts().then(() => process.exit(0));
 }
