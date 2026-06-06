@@ -423,6 +423,7 @@ router.put('/settings', authenticate, requireAdmin, async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 // Get all payments across all clients
 router.get('/payments', authenticate, requireAdmin, async (req, res) => {
   try {
@@ -519,4 +520,60 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
     res.status(500).json({ error: 'Failed to fetch payment summary' });
   }
 });
+
+// ============================================
+// AFFILIATE AUTO-PAYOUT ENDPOINTS
+// ============================================
+
+// Run affiliate auto-payout (requires admin JWT)
+router.post('/run-payout', authenticate, requireAdmin, async (req, res) => {
+  try {
+    console.log('💰 Affiliate payout triggered by admin:', req.user?.email);
+    
+    const { processAutoPayouts } = await import('../jobs/autoPayout');
+    await processAutoPayouts();
+    
+    res.json({ 
+      success: true, 
+      message: 'Affiliate payout process completed successfully' 
+    });
+  } catch (error) {
+    console.error('Payout error:', error);
+    res.status(500).json({ 
+      error: 'Payout process failed', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    });
+  }
+});
+
+// Cron job endpoint with secret key (no JWT required)
+router.post('/cron/payout', async (req, res) => {
+  const cronSecret = req.headers['x-cron-secret'];
+  const expectedSecret = process.env.CRON_SECRET_KEY;
+  
+  if (!expectedSecret) {
+    console.error('CRON_SECRET_KEY not set in environment variables');
+    return res.status(500).json({ error: 'Cron secret not configured' });
+  }
+  
+  if (cronSecret !== expectedSecret) {
+    console.error('Unauthorized cron attempt - invalid secret');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  
+  try {
+    console.log('💰 Cron-triggered affiliate payout');
+    const { processAutoPayouts } = await import('../jobs/autoPayout');
+    await processAutoPayouts();
+    
+    res.json({ success: true, message: 'Payout completed successfully' });
+  } catch (error) {
+    console.error('Cron payout error:', error);
+    res.status(500).json({ 
+      error: 'Payout failed', 
+      details: error instanceof Error ? error.message : 'Unknown error' 
+    });
+  }
+});
+
 export default router;
