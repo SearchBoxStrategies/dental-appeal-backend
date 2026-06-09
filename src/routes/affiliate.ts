@@ -13,7 +13,7 @@ const generateAffiliateCode = (email: string): string => {
 };
 
 // Helper function to check if affiliate is approved
-const checkAffiliateApproval = async (userId: string) => {
+const checkAffiliateApproval = async (userId: number) => {
   const { rows: [affiliate] } = await db.query(
     'SELECT is_active, stripe_account_id FROM affiliates WHERE user_id = $1',
     [userId]
@@ -42,44 +42,84 @@ router.post('/signup', async (req, res) => {
   }
 
   try {
-    const existing = await db.query(
-      'SELECT id, affiliate_code, is_active FROM affiliates WHERE email = $1',
+    // Check if user already exists in users table
+    const existingUser = await db.query(
+      'SELECT id, email, user_type FROM users WHERE email = $1',
       [email]
     );
 
-    if (existing.rows.length > 0) {
-      const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existing.rows[0].affiliate_code}`;
-      
-      // If existing affiliate is pending approval, inform them
-      if (!existing.rows[0].is_active) {
+    let userId: number;
+
+    if (existingUser.rows.length > 0) {
+      // User exists - check if they're already an affiliate
+      const existingAffiliate = await db.query(
+        'SELECT id, affiliate_code, is_active FROM affiliates WHERE user_id = $1',
+        [existingUser.rows[0].id]
+      );
+
+      if (existingAffiliate.rows.length > 0) {
+        // Already an affiliate
+        const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existingAffiliate.rows[0].affiliate_code}`;
+        
+        if (!existingAffiliate.rows[0].is_active) {
+          return res.json({
+            success: true,
+            alreadyExists: true,
+            pendingApproval: true,
+            affiliateCode: existingAffiliate.rows[0].affiliate_code,
+            affiliateLink,
+            message: 'You are already registered but your account is pending admin approval.'
+          });
+        }
+        
         return res.json({
           success: true,
           alreadyExists: true,
-          pendingApproval: true,
-          affiliateCode: existing.rows[0].affiliate_code,
+          pendingApproval: false,
+          affiliateCode: existingAffiliate.rows[0].affiliate_code,
           affiliateLink,
-          message: 'You are already registered but your account is pending admin approval.'
+          message: 'You are already registered as an affiliate!'
         });
       }
       
+      // User exists but not an affiliate - use existing user_id
+      userId = existingUser.rows[0].id;
+    } else {
+      // Create new user in users table (no password - they'll use forgot password)
+      const userResult = await db.query(
+        `INSERT INTO users (email, name, user_type, is_admin, created_at)
+         VALUES ($1, $2, 'affiliate', false, NOW())
+         RETURNING id`,
+        [email, fullName]
+      );
+      userId = userResult.rows[0].id;
+    }
+
+    // Check if affiliate already exists for this user
+    const existingAffiliate = await db.query(
+      'SELECT id, affiliate_code FROM affiliates WHERE user_id = $1',
+      [userId]
+    );
+
+    if (existingAffiliate.rows.length > 0) {
+      const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existingAffiliate.rows[0].affiliate_code}`;
       return res.json({
         success: true,
         alreadyExists: true,
-        pendingApproval: false,
-        affiliateCode: existing.rows[0].affiliate_code,
+        affiliateCode: existingAffiliate.rows[0].affiliate_code,
         affiliateLink,
-        message: 'You are already registered as an affiliate!'
+        message: 'Affiliate account already exists.'
       });
     }
 
+    // Create new affiliate record
     const affiliateCode = generateAffiliateCode(email);
-
-    // Set is_active to false - requires admin approval
+    
     const result = await db.query(
-      `INSERT INTO affiliates (full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, false, NULL)
+      `INSERT INTO affiliates (user_id, full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, NULL)
        RETURNING id, affiliate_code`,
-      [fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethod || null]
+      [userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethod || null]
     );
 
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliateCode}`;
@@ -88,7 +128,7 @@ router.post('/signup', async (req, res) => {
       success: true,
       affiliateCode: result.rows[0].affiliate_code,
       affiliateLink,
-      message: 'Registration successful! Your account is pending admin approval.',
+      message: 'Registration successful! Your account is pending admin approval. You will receive an email with instructions to set your password once approved.',
       pendingApproval: true
     });
   } catch (error) {
