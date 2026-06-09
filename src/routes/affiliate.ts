@@ -1,3 +1,39 @@
+import { Router, Request } from 'express';
+import { db } from '../db';
+import { authenticate } from '../middleware/auth';
+import crypto from 'crypto';
+import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
+
+const router = Router();
+
+const generateAffiliateCode = (email: string): string => {
+  const prefix = email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+  const random = crypto.randomBytes(4).toString('hex');
+  return `${prefix}_${random}`;
+};
+
+// Helper function to check if affiliate is approved
+const checkAffiliateApproval = async (userId: number) => {
+  const { rows: [affiliate] } = await db.query(
+    'SELECT is_active, stripe_account_id FROM affiliates WHERE user_id = $1',
+    [userId]
+  );
+  
+  if (!affiliate) {
+    throw new Error('Affiliate not found');
+  }
+  
+  if (!affiliate.is_active) {
+    throw new Error('Your affiliate account is pending admin approval. You will be notified once approved.');
+  }
+  
+  return affiliate;
+};
+
+// ============================================
+// PUBLIC ROUTES
+// ============================================
+
 router.post('/signup', async (req, res) => {
   const { fullName, email, companyName, payoutEmail, payoutMethod } = req.body;
 
@@ -98,3 +134,7 @@ router.post('/signup', async (req, res) => {
     res.status(500).json({ error: 'Failed to register affiliate' });
   }
 });
+
+// The rest of your affiliate.ts routes (track, stats, dashboard, etc.) remain the same...
+
+export default router;
