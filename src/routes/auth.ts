@@ -418,10 +418,10 @@ router.get('/me', async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
 
     const { rows: [user] } = await db.query(
-      `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.email_verified,
+      `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.email_verified, u.user_type,
               p.id as practice_id, p.name as practice_name, p.subscription_status 
        FROM users u 
-       JOIN practices p ON u.practice_id = p.id 
+       LEFT JOIN practices p ON u.practice_id = p.id 
        WHERE u.id = $1`,
       [decoded.userId]
     );
@@ -431,20 +431,48 @@ router.get('/me', async (req, res) => {
       return;
     }
 
+    // Get affiliate data if user is an affiliate
+    let affiliateData = null;
+    if (user.user_type === 'affiliate') {
+      const { rows: [affiliate] } = await db.query(
+        `SELECT affiliate_code, is_active, approved_at, commission_rate, tier,
+                total_clicks, total_signups, total_conversions, total_earnings, pending_earnings
+         FROM affiliates 
+         WHERE user_id = $1`,
+        [user.id]
+      );
+      affiliateData = affiliate;
+    }
+
     res.json({
-      user: { 
-        id: user.id, 
-        email: user.email, 
-        name: user.name, 
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
         role: user.role,
         is_admin: user.is_admin,
-        email_verified: user.email_verified
+        email_verified: user.email_verified,
+        user_type: user.user_type || (user.is_admin ? 'admin' : 'clinic'),
+        affiliate: affiliateData ? {
+          code: affiliateData.affiliate_code,
+          is_active: affiliateData.is_active,
+          approved_at: affiliateData.approved_at,
+          commission_rate: affiliateData.commission_rate,
+          tier: affiliateData.tier,
+          stats: {
+            clicks: affiliateData.total_clicks || 0,
+            signups: affiliateData.total_signups || 0,
+            conversions: affiliateData.total_conversions || 0,
+            earnings: affiliateData.total_earnings || 0,
+            pending: affiliateData.pending_earnings || 0
+          }
+        } : null
       },
-      practice: {
+      practice: user.practice_id ? {
         id: user.practice_id,
         name: user.practice_name,
         subscriptionStatus: user.subscription_status,
-      },
+      } : null,
     });
   } catch (error) {
     console.error(error);
