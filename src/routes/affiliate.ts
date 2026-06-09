@@ -246,7 +246,7 @@ router.get('/public-stats/:code', async (req, res) => {
         clicks: affiliate.total_clicks || 0,
         signups: affiliate.total_signups || 0,
         conversions: affiliate.total_conversions || 0,
-        commissionRate: affiliate.commission_rate || 20,
+        commissionRate: affiliate.commission_rate || 15,
         tier: affiliate.tier || 'standard',
         estimatedEarnings: Math.round(estimatedEarnings),
         joinLink: `${process.env.FRONTEND_URL}/register?ref=${affiliate.affiliate_code}`
@@ -568,7 +568,7 @@ router.get('/admin/pending', authenticate, async (req: Request, res) => {
   }
 });
 
-// Approve affiliate
+// Approve affiliate - UPDATED with 15% default
 router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -591,14 +591,15 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
       return res.status(400).json({ error: 'Affiliate is already approved' });
     }
 
+    // Default to 15% for standard tier
     await db.query(
       `UPDATE affiliates 
        SET is_active = true, 
            approved_at = NOW(),
-           commission_rate = COALESCE($1, commission_rate, 20),
-           tier = COALESCE($2, tier, 'standard')
+           commission_rate = COALESCE($1, 15),
+           tier = COALESCE($2, 'standard')
        WHERE id = $3`,
-      [commissionRate || 20, tier || 'standard', id]
+      [commissionRate || 15, tier || 'standard', id]
     );
 
     res.json({ 
