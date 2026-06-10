@@ -5,6 +5,7 @@ import { transferToAffiliate } from '../services/stripeConnect';
 // Run this on a schedule (e.g., 15th of each month at 9am)
 export async function processAutoPayouts() {
   console.log('🔄 Starting auto-payout process...');
+  const startTime = Date.now();
   
   // Verify environment variables are loaded
   if (!process.env.DATABASE_URL) {
@@ -20,7 +21,7 @@ export async function processAutoPayouts() {
   try {
     // Get all affiliates with verified Stripe accounts and auto-payout enabled
     const { rows: affiliates } = await db.query(
-      `SELECT id, stripe_account_id, pending_earnings
+      `SELECT id, stripe_account_id, pending_earnings, email, full_name
        FROM affiliates 
        WHERE stripe_account_id IS NOT NULL 
        AND stripe_account_status = 'verified'
@@ -28,16 +29,22 @@ export async function processAutoPayouts() {
        AND pending_earnings > 0`
     );
     
-    console.log(`Found ${affiliates.length} affiliates with pending earnings`);
+    console.log(`💰 Found ${affiliates.length} affiliates with pending earnings`);
+    
+    let successCount = 0;
+    let failureCount = 0;
+    let totalAmount = 0;
     
     for (const affiliate of affiliates) {
       try {
         const amount = parseFloat(affiliate.pending_earnings);
         
         if (amount < 1) {
-          console.log(`Skipping affiliate ${affiliate.id} - pending earnings less than $1`);
+          console.log(`⚠️ Skipping affiliate ${affiliate.id} (${affiliate.email}) - pending earnings $${amount.toFixed(2)} is less than $1 minimum`);
           continue;
         }
+        
+        console.log(`💸 Processing payout for ${affiliate.email}: $${amount.toFixed(2)}`);
         
         // Transfer funds via Stripe Connect
         const transfer = await transferToAffiliate(
@@ -78,18 +85,41 @@ export async function processAutoPayouts() {
             [amount, affiliate.id]
           );
           
-          console.log(`✅ Paid $${amount.toFixed(2)} to affiliate ${affiliate.id} (Transfer: ${transfer.id})`);
+          // Log successful payout
+          await db.query(
+            `INSERT INTO payout_logs (affiliate_id, amount, status, stripe_transfer_id, processed_at)
+             VALUES ($1, $2, 'success', $3, NOW())
+             ON CONFLICT (stripe_transfer_id) DO NOTHING`,
+            [affiliate.id, amount, transfer.id]
+          );
+          
+          console.log(`✅ Paid $${amount.toFixed(2)} to ${affiliate.email} (Transfer: ${transfer.id})`);
+          successCount++;
+          totalAmount += amount;
         }
         
       } catch (error) {
-        console.error(`❌ Failed to payout affiliate ${affiliate.id}:`, error);
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.error(`❌ Failed to payout affiliate ${affiliate.id} (${affiliate.email}):`, errorMessage);
+        failureCount++;
+        
+        // Log failed payout attempt
+        await db.query(
+          `INSERT INTO payout_logs (affiliate_id, amount, status, error_message, processed_at)
+           VALUES ($1, $2, 'failed', $3, NOW())`,
+          [affiliate.id, affiliate.pending_earnings, errorMessage]
+        );
         // Continue with next affiliate
       }
     }
     
-    console.log('✅ Auto-payout process completed');
+    const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+    console.log(`✅ Auto-payout process completed in ${duration}s`);
+    console.log(`📊 Summary: ${successCount} successful, ${failureCount} failed, total payout: $${totalAmount.toFixed(2)}`);
+    
   } catch (error) {
     console.error('❌ Auto-payout process failed:', error);
+    throw error;
   }
 }
 
