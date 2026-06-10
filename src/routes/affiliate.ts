@@ -174,10 +174,8 @@ router.post('/signup', async (req, res) => {
     
     await db.query(
       `INSERT INTO affiliates (user_id, full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, false, NULL)
-       RETURNING id`,
-      [userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethodValue, false, NULL]
-    );
+ VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)`,
+[userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethodValue, false, null]
 
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliateCode}`;
 
