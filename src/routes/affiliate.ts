@@ -89,6 +89,9 @@ router.post('/signup', async (req, res) => {
     return res.status(400).json({ error: 'Full name and email are required' });
   }
 
+  // Default to 'stripe' if no payout method provided
+  const payoutMethodValue = payoutMethod || 'stripe';
+
   try {
     // Check if user already exists in users table
     const existingUser = await db.query(
@@ -173,7 +176,7 @@ router.post('/signup', async (req, res) => {
       `INSERT INTO affiliates (user_id, full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NULL)
        RETURNING id`,
-      [userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethod || null]
+      [userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethodValue, false, NULL]
     );
 
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliateCode}`;
