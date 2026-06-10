@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/auth';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
-import { sendAffiliateVerificationEmail } from '../services/email';
+import { sendEmail } from '../services/email';
 
 const router = Router();
 
@@ -13,6 +13,51 @@ const generateAffiliateCode = (email: string): string => {
   const random = crypto.randomBytes(4).toString('hex');
   return `${prefix}_${random}`;
 };
+
+// Email function for affiliate verification
+async function sendAffiliateVerificationEmail(email: string, name: string, verificationLink: string) {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="text-align: center; padding: 20px 0;">
+        <img src="https://dentalappeal.claims/logo.png" alt="DentalAppeal" style="height: 50px;">
+      </div>
+      <h2 style="color: #2d3748;">Welcome to the DentalAppeal Affiliate Program, ${name}!</h2>
+      <p style="color: #4a5568;">Thank you for signing up as an affiliate. Please verify your email address to continue.</p>
+      
+      <div style="background-color: #f7fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+        <h3 style="color: #2d3748; margin-top: 0;">Next steps:</h3>
+        <ol style="color: #4a5568; line-height: 1.6;">
+          <li>Click the button below to verify your email</li>
+          <li>Set your password on the next page</li>
+          <li>Wait for admin approval of your affiliate account</li>
+          <li>Once approved, access your affiliate dashboard and start earning commissions!</li>
+        </ol>
+      </div>
+      
+      <div style="text-align: center; margin: 30px 0;">
+        <a href="${verificationLink}" style="display: inline-block; padding: 12px 24px; background-color: #2b6cb0; color: white; text-decoration: none; border-radius: 6px; font-weight: bold;">
+          Verify Email & Set Password
+        </a>
+      </div>
+      
+      <p style="color: #718096; font-size: 14px;">If you didn't sign up for our affiliate program, please ignore this email.</p>
+      <p style="color: #718096; font-size: 14px;">This verification link expires in 24 hours.</p>
+      
+      <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+      
+      <p style="color: #a0aec0; font-size: 12px; text-align: center;">
+        DentalAppeal - AI-Powered Insurance Appeal Management<br>
+        <a href="https://dentalappeal.claims" style="color: #a0aec0;">dentalappeal.claims</a>
+      </p>
+    </div>
+  `;
+  
+  await sendEmail({
+    to: email,
+    subject: 'Verify Your Affiliate Account - DentalAppeal',
+    html
+  });
+}
 
 // Helper function to check if affiliate is approved
 const checkAffiliateApproval = async (userId: number) => {
@@ -203,7 +248,7 @@ router.post('/set-password', async (req, res) => {
     const result = await db.query(
       `UPDATE users 
        SET password_hash = $1
-       WHERE email = $2 AND email_verified = true AND password_hash IS NULL
+       WHERE email = $2 AND email_verified = true AND (password_hash IS NULL OR password_hash = '')
        RETURNING id, email`,
       [passwordHash, email]
     );
