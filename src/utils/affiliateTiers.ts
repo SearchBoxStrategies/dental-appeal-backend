@@ -11,6 +11,25 @@ export interface AffiliateTierWithId extends AffiliateTier {
   affiliateId: number;
 }
 
+export interface NextTierInfo {
+  nextTier: string | null;
+  nextRate: number | null;
+  conversionsNeeded: number | null;
+}
+
+/**
+ * Get tier based on conversion count (pure function)
+ */
+export function getTierByConversionCount(conversionCount: number): { rate: number; name: string } {
+  if (conversionCount >= 50) {
+    return { rate: 25, name: 'Partner' };
+  }
+  if (conversionCount >= 10) {
+    return { rate: 20, name: 'Pro' };
+  }
+  return { rate: 15, name: 'Standard' };
+}
+
 /**
  * Get affiliate tier based on number of successful conversions
  * Uses total_conversions from the affiliates table
@@ -22,15 +41,13 @@ export async function getAffiliateTier(affiliateId: number): Promise<AffiliateTi
   );
   
   const referralCount = affiliate?.total_conversions || 0;
+  const tier = getTierByConversionCount(referralCount);
   
-  // Your 3-tier logic
-  if (referralCount >= 50) {
-    return { rate: 25, name: 'Partner', referralCount };
-  }
-  if (referralCount >= 10) {
-    return { rate: 20, name: 'Pro', referralCount };
-  }
-  return { rate: 15, name: 'Standard', referralCount };
+  return { 
+    rate: tier.rate, 
+    name: tier.name, 
+    referralCount 
+  };
 }
 
 /**
@@ -65,10 +82,42 @@ export async function updateAffiliateTierColumn(affiliateId: number): Promise<vo
     `UPDATE affiliates 
      SET tier = $1, commission_rate = $2
      WHERE id = $3`,
-    [tier.name, tier.rate, affiliateId]
+    [tier.name.toLowerCase(), tier.rate, affiliateId]
   );
   
   console.log(`✅ Updated affiliate ${affiliateId} to ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} conversions`);
+}
+
+/**
+ * Get info about the next tier the affiliate can achieve
+ */
+export async function getNextTierInfo(affiliateId: number): Promise<NextTierInfo> {
+  const { rows: [affiliate] } = await db.query(
+    `SELECT total_conversions FROM affiliates WHERE id = $1`,
+    [affiliateId]
+  );
+  
+  const conversionCount = affiliate?.total_conversions || 0;
+  
+  if (conversionCount < 10) {
+    return {
+      nextTier: 'Pro',
+      nextRate: 20,
+      conversionsNeeded: 10 - conversionCount,
+    };
+  } else if (conversionCount < 50) {
+    return {
+      nextTier: 'Partner',
+      nextRate: 25,
+      conversionsNeeded: 50 - conversionCount,
+    };
+  } else {
+    return {
+      nextTier: null,
+      nextRate: null,
+      conversionsNeeded: null,
+    };
+  }
 }
 
 /**
