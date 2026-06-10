@@ -2,7 +2,9 @@ import { Router, Request } from 'express';
 import { db } from '../db';
 import { authenticate } from '../middleware/auth';
 import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
+import { sendAffiliateVerificationEmail } from '../services/email';
 
 const router = Router();
 
@@ -44,7 +46,7 @@ router.post('/signup', async (req, res) => {
   try {
     // Check if user already exists in users table
     const existingUser = await db.query(
-      'SELECT id, email, user_type FROM users WHERE email = $1',
+      'SELECT id, email, user_type, email_verified FROM users WHERE email = $1',
       [email]
     );
 
@@ -83,14 +85,22 @@ router.post('/signup', async (req, res) => {
       
       userId = existingUser.rows[0].id;
     } else {
-      // Create new user with NULL password_hash (they'll set it later via forgot password)
+      // Create new user (no password - they'll set it via email verification)
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const tokenExpiry = new Date();
+      tokenExpiry.setHours(tokenExpiry.getHours() + 24);
+      
       const userResult = await db.query(
-        `INSERT INTO users (email, name, user_type, is_admin, password_hash, created_at)
-         VALUES ($1, $2, 'affiliate', false, NULL, NOW())
+        `INSERT INTO users (email, name, user_type, is_admin, verification_token, verification_token_expires, email_verified, created_at)
+         VALUES ($1, $2, 'affiliate', false, $3, $4, false, NOW())
          RETURNING id`,
-        [email, fullName]
+        [email, fullName, verificationToken, tokenExpiry]
       );
       userId = userResult.rows[0].id;
+      
+      // Send verification email
+      const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
+      await sendAffiliateVerificationEmail(email, fullName, verificationLink);
     }
 
     // Check if affiliate already exists for this user
@@ -113,10 +123,10 @@ router.post('/signup', async (req, res) => {
     // Create new affiliate record
     const affiliateCode = generateAffiliateCode(email);
     
-    const result = await db.query(
+    await db.query(
       `INSERT INTO affiliates (user_id, full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, false, NULL)
-       RETURNING id, affiliate_code`,
+       RETURNING id`,
       [userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethod || null]
     );
 
@@ -124,14 +134,129 @@ router.post('/signup', async (req, res) => {
 
     res.json({
       success: true,
-      affiliateCode: result.rows[0].affiliate_code,
+      affiliateCode: affiliateCode,
       affiliateLink,
-      message: 'Registration successful! Your account is pending admin approval. You will receive an email with instructions to set your password once approved.',
-      pendingApproval: true
+      message: 'Registration successful! Please check your email to verify your account. Your affiliate account will be active after admin approval.',
+      pendingApproval: true,
+      requiresVerification: true
     });
   } catch (error) {
     console.error('Affiliate signup error:', error);
     res.status(500).json({ error: 'Failed to register affiliate' });
+  }
+});
+
+// Verify affiliate email
+router.get('/verify', async (req, res) => {
+  try {
+    const { token } = req.query;
+    
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'Invalid verification token' });
+    }
+    
+    const { rows: [user] } = await db.query(
+      `SELECT id, email, name, verification_token, verification_token_expires, email_verified
+       FROM users 
+       WHERE verification_token = $1 AND user_type = 'affiliate' AND email_verified = false`,
+      [token]
+    );
+    
+    if (!user) {
+      return res.redirect(`${process.env.FRONTEND_URL}/affiliate/verify?error=invalid`);
+    }
+    
+    if (new Date() > user.verification_token_expires) {
+      return res.redirect(`${process.env.FRONTEND_URL}/affiliate/verify?error=expired`);
+    }
+    
+    // Mark email as verified
+    await db.query(
+      `UPDATE users 
+       SET email_verified = true, 
+           email_verified_at = NOW(), 
+           verification_token = NULL,
+           verification_token_expires = NULL
+       WHERE id = $1`,
+      [user.id]
+    );
+    
+    // Redirect to set password page
+    res.redirect(`${process.env.FRONTEND_URL}/affiliate/set-password?email=${encodeURIComponent(user.email)}&verified=true`);
+  } catch (error) {
+    console.error('Affiliate verification error:', error);
+    res.status(500).json({ error: 'Verification failed' });
+  }
+});
+
+// Set password for verified affiliate
+router.post('/set-password', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    if (!email || !password || password.length < 6) {
+      return res.status(400).json({ error: 'Email and password (min 6 characters) are required' });
+    }
+    
+    const passwordHash = await bcrypt.hash(password, 10);
+    
+    const result = await db.query(
+      `UPDATE users 
+       SET password_hash = $1
+       WHERE email = $2 AND email_verified = true AND password_hash IS NULL
+       RETURNING id, email`,
+      [passwordHash, email]
+    );
+    
+    if (result.rows.length === 0) {
+      return res.status(400).json({ error: 'User not found, email not verified, or password already set' });
+    }
+    
+    res.json({ success: true, message: 'Password set successfully. You can now log in.' });
+  } catch (error) {
+    console.error('Set password error:', error);
+    res.status(500).json({ error: 'Failed to set password' });
+  }
+});
+
+// Resend verification email
+router.post('/resend-verification', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    const { rows: [user] } = await db.query(
+      `SELECT id, email, name, email_verified, user_type
+       FROM users 
+       WHERE email = $1 AND user_type = 'affiliate'`,
+      [email]
+    );
+    
+    if (!user) {
+      return res.status(404).json({ error: 'Affiliate not found' });
+    }
+    
+    if (user.email_verified) {
+      return res.status(400).json({ error: 'Email already verified' });
+    }
+    
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const tokenExpiry = new Date();
+    tokenExpiry.setHours(tokenExpiry.getHours() + 24);
+    
+    await db.query(
+      `UPDATE users 
+       SET verification_token = $1, verification_token_expires = $2
+       WHERE id = $3`,
+      [verificationToken, tokenExpiry, user.id]
+    );
+    
+    const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
+    await sendAffiliateVerificationEmail(user.email, user.name, verificationLink);
+    
+    res.json({ success: true, message: 'Verification email resent' });
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({ error: 'Failed to resend verification email' });
   }
 });
 
@@ -158,7 +283,6 @@ router.get('/track/:code', async (req, res) => {
         [affiliate.rows[0].id]
       );
 
-      // Set 90-day cookie for attribution
       res.cookie('affiliate_ref', code, {
         maxAge: 90 * 24 * 60 * 60 * 1000,
         httpOnly: true,
@@ -511,7 +635,6 @@ router.post('/connect/auto-payout', authenticate, async (req: Request, res) => {
 // ADMIN ROUTES
 // ============================================
 
-// Get all affiliates (admin only)
 router.get('/admin/list', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -540,7 +663,6 @@ router.get('/admin/list', authenticate, async (req: Request, res) => {
   }
 });
 
-// Get pending affiliates
 router.get('/admin/pending', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -568,7 +690,6 @@ router.get('/admin/pending', authenticate, async (req: Request, res) => {
   }
 });
 
-// Approve affiliate - UPDATED with 15% default
 router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -591,7 +712,6 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
       return res.status(400).json({ error: 'Affiliate is already approved' });
     }
 
-    // Default to 15% for standard tier
     await db.query(
       `UPDATE affiliates 
        SET is_active = true, 
@@ -612,7 +732,6 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
   }
 });
 
-// Reject affiliate
 router.delete('/admin/:id/reject', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -648,7 +767,6 @@ router.delete('/admin/:id/reject', authenticate, async (req: Request, res) => {
   }
 });
 
-// Get all commissions (admin only)
 router.get('/admin/commissions', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
@@ -672,7 +790,6 @@ router.get('/admin/commissions', authenticate, async (req: Request, res) => {
   }
 });
 
-// Process payout for an affiliate
 router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
   try {
     if (!req.user?.isAdmin) {
