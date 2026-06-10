@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
 import { sendEmail } from '../services/email';
+import { getNextTierInfo, updateAffiliateTierColumn } from '../utils/affiliateTiers';
 
 const router = Router();
 
@@ -461,6 +462,9 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
       });
     }
     
+    // Get next tier info
+    const nextTier = await getNextTierInfo(affiliate.id);
+    
     const { rows: referrals } = await db.query(
       `SELECT id, referral_code, status, clicked_at, signed_up_at, converted_at, practice_id
        FROM affiliate_referrals 
@@ -500,7 +504,8 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
       affiliate,
       referrals,
       commissions,
-      monthlyEarnings
+      monthlyEarnings,
+      nextTier
     });
   } catch (error) {
     console.error('Dashboard error:', error);
@@ -880,6 +885,34 @@ router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
   } catch (error) {
     console.error('Payout error:', error);
     res.status(500).json({ error: 'Failed to process payout' });
+  }
+});
+
+// Admin: Recalculate all affiliate tiers
+router.post('/admin/recalculate-tiers', authenticate, async (req: Request, res) => {
+  try {
+    if (!req.user?.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+    
+    const { rows: affiliates } = await db.query(
+      'SELECT id FROM affiliates'
+    );
+    
+    let updated = 0;
+    for (const affiliate of affiliates) {
+      await updateAffiliateTierColumn(affiliate.id);
+      updated++;
+    }
+    
+    res.json({ 
+      success: true, 
+      message: `Recalculated tiers for ${updated} affiliates`,
+      totalAffiliates: affiliates.length 
+    });
+  } catch (error) {
+    console.error('Recalculate tiers error:', error);
+    res.status(500).json({ error: 'Failed to recalculate tiers' });
   }
 });
 
