@@ -1,8 +1,8 @@
 import nodemailer from 'nodemailer';
 
-// Configure email transporter for Hostinger Titan Email
+// Configure email transporter for Hostinger
 const transporter = nodemailer.createTransport({
-  host: "smtp.titan.email",
+  host: "smtp.hostinger.com",
   port: 465,
   secure: true,
   auth: {
