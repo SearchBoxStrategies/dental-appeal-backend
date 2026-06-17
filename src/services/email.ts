@@ -365,7 +365,9 @@ export const sendWeeklyDigest = async (email: string, name: string, stats: {
     </div>
   `;
   await sendEmail({ to: email, subject, html });
-  // Send affiliate verification email
+};
+
+// Send affiliate verification email
 export const sendAffiliateVerificationEmail = async (email: string, name: string, verificationLink: string) => {
   const subject = 'Verify Your Affiliate Account - DentalAppeal';
   const html = `
@@ -437,5 +439,4 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
   `;
 
   await sendEmail({ to: email, subject, html });
-};
 };
