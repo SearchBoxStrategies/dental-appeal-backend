@@ -1,8 +1,8 @@
 import nodemailer from 'nodemailer';
 
-// Configure email transporter for Hostinger (using correct SMTP)
+// Configure email transporter for Hostinger Titan Email
 const transporter = nodemailer.createTransport({
-  host: "smtp.hostinger.com",
+  host: "smtp.titan.email",
   port: 465,
   secure: true,
   auth: {
@@ -38,7 +38,7 @@ export const sendEmail = async (options: EmailOptions) => {
 // Send verification email for new registrations
 export const sendVerificationEmail = async (email: string, token: string, practiceName: string) => {
   const verificationUrl = `${process.env.BACKEND_URL || 'https://api.dentalappeal.claims'}/api/auth/verify/${token}`;
-  
+
   const subject = 'Verify Your DentalAppeal Account';
   const html = `
     <!DOCTYPE html>
@@ -182,7 +182,7 @@ export const sendVerificationEmail = async (email: string, token: string, practi
     </body>
     </html>
   `;
-  
+
   await sendEmail({ to: email, subject, html });
 };
 
@@ -215,14 +215,14 @@ export const sendAdminVerificationCode = async (email: string, code: string, nam
     </body>
     </html>
   `;
-  
+
   await sendEmail({ to: email, subject, html });
 };
 
 // Send password reset email
 export const sendPasswordResetEmail = async (email: string, token: string, name: string) => {
   const resetUrl = `${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/reset-password/${token}`;
-  
+
   const subject = 'Reset Your DentalAppeal Password';
   const html = `
     <!DOCTYPE html>
@@ -256,7 +256,7 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
     </body>
     </html>
   `;
-  
+
   await sendEmail({ to: email, subject, html });
 };
 
@@ -270,7 +270,7 @@ export const sendAppealStatusUpdate = async (email: string, patientName: string,
     lost: 'Lost',
     paid: 'Paid'
   };
-  
+
   const subject = `Appeal Status Update - ${patientName}`;
   const html = `
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
