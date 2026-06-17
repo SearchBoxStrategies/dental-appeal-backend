@@ -4,7 +4,7 @@ import { authenticate } from '../middleware/auth';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
-import { sendEmail } from '../services/email';
+import { sendEmail, sendAffiliateVerificationEmail } from '../services/email';
 import { getNextTierInfo, updateAffiliateTierColumn } from '../utils/affiliateTiers';
 
 const router = Router();
