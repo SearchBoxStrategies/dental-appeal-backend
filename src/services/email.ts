@@ -1,12 +1,12 @@
 import nodemailer from 'nodemailer';
 
-// Configure email transporter for Hostinger
+// Configure email transporter using environment variables
 const transporter = nodemailer.createTransport({
-  host: "smtp.hostinger.com",
-  port: 465,
+  host: process.env.SMTP_HOST || "smtp.hostinger.com",
+  port: parseInt(process.env.SMTP_PORT || "465"),
   secure: true,
   auth: {
-    user: "support@dentalappeal.claims",
+    user: process.env.SMTP_USER || "support@dentalappeal.claims",
     pass: process.env.SMTP_PASS,
   },
 });
@@ -21,7 +21,7 @@ export interface EmailOptions {
 export const sendEmail = async (options: EmailOptions) => {
   try {
     await transporter.sendMail({
-      from: `"DentalAppeal Support" <support@dentalappeal.claims>`,
+      from: `"DentalAppeal Support" <${process.env.SMTP_USER || "support@dentalappeal.claims"}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,
