@@ -19,18 +19,29 @@ export interface EmailOptions {
 }
 
 export const sendEmail = async (options: EmailOptions) => {
+  console.log(`📧 sendEmail called for ${options.to}`);
+  console.log(`📧 SMTP_PASS: ${process.env.SMTP_PASS ? 'SET' : 'NOT SET'}`);
+  console.log(`📧 SMTP_HOST: ${process.env.SMTP_HOST || 'NOT SET'}`);
+  console.log(`📧 SMTP_USER: ${process.env.SMTP_USER || 'NOT SET'}`);
+  console.log(`📧 SMTP_PORT: ${process.env.SMTP_PORT || 'NOT SET'}`);
   try {
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"DentalAppeal Support" <${process.env.SMTP_USER || "support@dentalappeal.claims"}>`,
       to: options.to,
       subject: options.subject,
       html: options.html,
       text: options.text,
     });
-    console.log(`📧 Email sent to ${options.to}`);
+    console.log(`📧 Email sent to ${options.to} (Message ID: ${info.messageId})`);
     return true;
   } catch (error) {
-    console.error('Email send error:', error);
+    console.error('❌ Email send error:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      code: error.code,
+      command: error.command,
+      response: error.response
+    });
     return false;
   }
 };
@@ -369,6 +380,9 @@ export const sendWeeklyDigest = async (email: string, name: string, stats: {
 
 // Send affiliate verification email
 export const sendAffiliateVerificationEmail = async (email: string, name: string, verificationLink: string) => {
+  console.log(`📧 sendAffiliateVerificationEmail called for ${email}`);
+  console.log(`📧 Verification link: ${verificationLink}`);
+  
   const subject = 'Verify Your Affiliate Account - DentalAppeal';
   const html = `
     <!DOCTYPE html>
@@ -438,5 +452,7 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
     </html>
   `;
 
-  await sendEmail({ to: email, subject, html });
+  const result = await sendEmail({ to: email, subject, html });
+  console.log(`📧 sendAffiliateVerificationEmail result for ${email}: ${result ? 'SUCCESS' : 'FAILED'}`);
+  return result;
 };
