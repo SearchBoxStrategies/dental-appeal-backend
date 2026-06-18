@@ -38,7 +38,9 @@ const checkAffiliateApproval = async (userId: number) => {
 // ============================================
 
 router.post('/signup', async (req, res) => {
+  console.log('🔵 AFFILIATE SIGNUP CALLED');
   const { fullName, email, companyName, payoutEmail, payoutMethod } = req.body;
+  console.log(`📧 FullName: ${fullName}, Email: ${email}`);
 
   if (!fullName || !email) {
     return res.status(400).json({ error: 'Full name and email are required' });
@@ -104,7 +106,15 @@ router.post('/signup', async (req, res) => {
       
       // Send verification email
       const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
-      await sendAffiliateVerificationEmail(email, fullName, verificationLink);
+      console.log(`📧 Attempting to send verification email to ${email}`);
+      console.log(`🔗 Verification link: ${verificationLink}`);
+      console.log(`📧 SMTP_PASS: ${process.env.SMTP_PASS ? 'SET' : 'NOT SET'}`);
+      try {
+        await sendAffiliateVerificationEmail(email, fullName, verificationLink);
+        console.log(`✅ Verification email sent to ${email}`);
+      } catch (error) {
+        console.error(`❌ Failed to send verification email to ${email}:`, error);
+      }
     }
 
     // Check if affiliate already exists for this user
@@ -255,7 +265,13 @@ router.post('/resend-verification', async (req, res) => {
     );
     
     const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
-    await sendAffiliateVerificationEmail(user.email, user.name, verificationLink);
+    console.log(`📧 Resending verification email to ${user.email}`);
+    try {
+      await sendAffiliateVerificationEmail(user.email, user.name, verificationLink);
+      console.log(`✅ Resent verification email to ${user.email}`);
+    } catch (error) {
+      console.error(`❌ Failed to resend verification email to ${user.email}:`, error);
+    }
     
     res.json({ success: true, message: 'Verification email resent' });
   } catch (error) {
