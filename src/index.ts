@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+import path from 'path';
+dotenv.config({ path: '/home/u884476253/.env_dentalappeal' });
+
 import express from 'express';
 import cors from 'cors';
 import adminRouter from './routes/admin';
@@ -72,7 +75,7 @@ const routers = [
   { path: '/api/billing', router: billingRouter, name: 'Billing' },
   { path: '/api/cdt-codes', router: cdtCodesRouter, name: 'CDTCodes' },
   { path: '/api/admin', router: adminRouter, name: 'Admin' },
-  { path: '/api/affiliate', router: affiliateRouter, name: 'Affiliate' } // 🆕 ADD THIS
+  { path: '/api/affiliate', router: affiliateRouter, name: 'Affiliate' }
 ];
 
 routers.forEach(({ path, router, name }) => {
