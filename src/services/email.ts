@@ -169,7 +169,7 @@ export const sendVerificationEmail = async (email: string, token: string, practi
               Thank you for registering with DentalAppeal. Please verify your email address to activate your account and start managing your insurance appeals.
             </p>
             <div style="text-align: center;">
-              <a href="${verificationUrl}" class="button">Verify Email Address</a>
+              <a href="${verificationUrl}" style="display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2);">Verify Email Address</a>
             </div>
             <div class="warning-box">
               <strong>⚠️ This verification link expires in 24 hours.</strong>
@@ -401,7 +401,8 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
         .content { padding: 40px 32px; }
         .greeting { font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
         .message { color: #475569; line-height: 1.6; margin-bottom: 24px; }
-        .button { display: inline-block; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
+        .button { display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
+        .button:hover { background: linear-gradient(135deg, #1d4ed8, #1e40af); }
         .warning-box { background-color: #fef3c7; padding: 16px; border-radius: 8px; margin: 24px 0; font-size: 14px; border-left: 4px solid #f59e0b; }
         .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0; background-color: #f8fafc; }
         .link-fallback { font-size: 12px; color: #64748b; word-break: break-all; background-color: #f1f5f9; padding: 12px; border-radius: 8px; margin-top: 16px; }
