@@ -27,7 +27,7 @@ const PORT = process.env.PORT ?? 3001;
 
 // Explicit CORS configuration for browser compatibility
 app.use(cors({ 
-  origin: ['https://app.dentalappeal.claims', 'http://localhost:5173'],
+  origin: ['https://app.dentalappeal.claims', 'http://localhost:5173', 'https://api.dentalappeal.claims'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
