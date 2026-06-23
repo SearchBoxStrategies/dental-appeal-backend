@@ -391,59 +391,43 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Verify Your Affiliate Account</title>
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
-        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
-        .header { background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); padding: 32px; text-align: center; border-bottom: 1px solid #e2e8f0; }
-        .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
-        .logo-img { width: 48px; height: 48px; object-fit: contain; }
-        .company-name { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #1e3a5f, #2563eb); -webkit-background-clip: text; background-clip: text; color: transparent; }
-        .content { padding: 40px 32px; }
-        .greeting { font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
-        .message { color: #475569; line-height: 1.6; margin-bottom: 24px; }
-        .button { display: inline-block; padding: 14px 32px; background: linear-gradient(135deg, #2563eb, #1d4ed8); color: white; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2); }
-        .button:hover { background: linear-gradient(135deg, #1d4ed8, #1e40af); }
-        .warning-box { background-color: #fef3c7; padding: 16px; border-radius: 8px; margin: 24px 0; font-size: 14px; border-left: 4px solid #f59e0b; }
-        .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0; background-color: #f8fafc; }
-        .link-fallback { font-size: 12px; color: #64748b; word-break: break-all; background-color: #f1f5f9; padding: 12px; border-radius: 8px; margin-top: 16px; }
-      </style>
     </head>
-    <body>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4;">
       <div style="padding: 20px;">
-        <div class="container">
-          <div class="header">
-            <div class="logo-container">
-              <img src="https://app.dentalappeal.claims/logo.png" alt="DentalAppeal" class="logo-img" />
-              <span class="company-name">DentalAppeal</span>
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+          <div style="background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); padding: 32px; text-align: center; border-bottom: 1px solid #e2e8f0;">
+            <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px;">
+              <img src="https://app.dentalappeal.claims/logo.png" alt="DentalAppeal" style="width: 48px; height: 48px; object-fit: contain;" />
+              <span style="font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #1e3a5f, #2563eb); -webkit-background-clip: text; background-clip: text; color: transparent;">DentalAppeal</span>
             </div>
           </div>
-          <div class="content">
-            <div class="greeting">Welcome to the DentalAppeal Affiliate Program, ${name}!</div>
-            <p class="message">
+          <div style="padding: 40px 32px;">
+            <div style="font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 16px;">Welcome to the DentalAppeal Affiliate Program, ${name}!</div>
+            <p style="color: #475569; line-height: 1.6; margin-bottom: 24px;">
               Thank you for signing up as an affiliate. Please verify your email address to continue.
             </p>
-            <div style="text-align: center;">
-              <a href="${verificationLink}" class="button">Verify Email & Set Password</a>
+            <div style="text-align: center; margin: 20px 0;">
+              <a href="${verificationLink}" style="display: inline-block; padding: 14px 32px; background: #2563eb; color: #ffffff !important; text-decoration: none !important; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2); border: none; cursor: pointer; text-align: center;" target="_blank">Verify Email & Set Password</a>
             </div>
-            <div class="warning-box">
+            <div style="background-color: #fef3c7; padding: 16px; border-radius: 8px; margin: 24px 0; font-size: 14px; border-left: 4px solid #f59e0b;">
               <strong>⚠️ This verification link expires in 24 hours.</strong>
             </div>
             <p style="font-size: 14px; color: #475569;">
               Next steps after verification:
-              <ol>
+              <ol style="color: #475569; line-height: 1.8;">
                 <li>Set your password</li>
                 <li>Wait for admin approval</li>
                 <li>Access your affiliate dashboard</li>
                 <li>Connect Stripe for payouts</li>
               </ol>
             </p>
-            <div class="link-fallback">
+            <div style="font-size: 12px; color: #64748b; word-break: break-all; background-color: #f1f5f9; padding: 12px; border-radius: 8px; margin-top: 16px;">
               <strong>Can't click the button?</strong><br>
               Copy and paste this link into your browser:<br>
-              <a href="${verificationLink}" style="color: #2563eb;">${verificationLink}</a>
+              <a href="${verificationLink}" style="color: #2563eb; word-break: break-all;">${verificationLink}</a>
             </div>
           </div>
-          <div class="footer">
+          <div style="text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0; background-color: #f8fafc;">
             <p><strong>DentalAppeal</strong> — AI-Powered Dental Insurance Appeals</p>
             <p>&copy; 2026 Search Box Strategies. All rights reserved.</p>
           </div>
