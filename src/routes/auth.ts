@@ -4,12 +4,17 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { db } from '../db';
-import { sendVerificationEmail, sendPasswordResetEmail, sendAdminVerificationCode } from '../services/email';
+import { sendVerificationEmail, sendPasswordResetEmail, sendAdminVerificationCode, sendTwoFactorCodeEmail } from '../services/email';
 
 const router = Router();
 
 // Helper: Generate 6-digit verification code
 const generateVerificationCode = (): string => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+// Helper: Generate 6-digit 2FA code
+const generateTwoFactorCode = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
@@ -199,13 +204,9 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// =============================================
-// SIMPLE LOGIN - Bypasses all checks
-// Use this to get into the admin portal
-// Remove this version and restore proper auth after login
-// =============================================
+// Login with 2FA support
 router.post('/login', async (req, res) => {
-  console.log('🔐 SIMPLE LOGIN - bypass all checks');
+  console.log('🔐 LOGIN - with 2FA support');
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -222,14 +223,38 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Simple password check
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
       console.log('❌ Invalid password for:', email);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Generate token - ignore is_admin, just log them in
+    // Check if 2FA is enabled for this user
+    if (user.two_factor_enabled) {
+      const code = generateTwoFactorCode();
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+      
+      await db.query(
+        `UPDATE users 
+         SET two_factor_code = $1, two_factor_expires = $2 
+         WHERE id = $3`,
+        [code, expiresAt, user.id]
+      );
+      
+      await sendTwoFactorCodeEmail(user.email, code, user.name);
+      
+      console.log(`✅ 2FA code sent to ${user.email}`);
+      
+      return res.json({
+        requiresTwoFactor: true,
+        userId: user.id,
+        email: user.email,
+        message: 'A verification code has been sent to your email.'
+      });
+    }
+
+    // If 2FA is not enabled, continue with normal login
     const token = jwt.sign(
       { 
         userId: user.id, 
@@ -242,7 +267,6 @@ router.post('/login', async (req, res) => {
     );
 
     console.log('✅ LOGIN SUCCESS for:', email);
-    console.log('👤 is_admin:', user.is_admin);
 
     res.json({
       token,
@@ -252,7 +276,8 @@ router.post('/login', async (req, res) => {
         name: user.name, 
         role: user.role,
         email_verified: user.email_verified,
-        is_admin: user.is_admin
+        is_admin: user.is_admin,
+        two_factor_enabled: user.two_factor_enabled
       },
       practice: {
         id: user.practice_id,
@@ -265,6 +290,120 @@ router.post('/login', async (req, res) => {
     if (error instanceof z.ZodError) {
       return res.status(400).json({ error: error.errors });
     }
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Verify 2FA code
+router.post('/verify-2fa', async (req, res) => {
+  try {
+    const { userId, code } = req.body;
+    
+    if (!userId || !code) {
+      return res.status(400).json({ error: 'User ID and code are required' });
+    }
+    
+    const { rows: [user] } = await db.query(
+      `SELECT id, email, name, two_factor_code, two_factor_expires, practice_id 
+       FROM users 
+       WHERE id = $1 AND two_factor_enabled = true`,
+      [userId]
+    );
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found or 2FA not enabled' });
+    }
+    
+    if (!user.two_factor_code || new Date() > user.two_factor_expires) {
+      return res.status(400).json({ error: 'Verification code expired. Please request a new one.' });
+    }
+    
+    if (user.two_factor_code !== code) {
+      return res.status(400).json({ error: 'Invalid verification code' });
+    }
+    
+    // Clear the code
+    await db.query(
+      `UPDATE users 
+       SET two_factor_code = NULL, two_factor_expires = NULL 
+       WHERE id = $1`,
+      [userId]
+    );
+    
+    // Get practice info
+    const { rows: [practice] } = await db.query(
+      'SELECT name, subscription_status FROM practices WHERE id = $1',
+      [user.practice_id]
+    );
+    
+    // Generate token
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        practiceId: user.practice_id, 
+        role: user.role, 
+        practiceName: practice?.name || 'Admin' 
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: '7d' }
+    );
+    
+    res.json({
+      token,
+      user: { 
+        id: user.id, 
+        email: user.email, 
+        name: user.name, 
+        role: user.role,
+        is_admin: user.is_admin,
+        two_factor_enabled: user.two_factor_enabled
+      },
+      practice: practice ? {
+        id: user.practice_id,
+        name: practice.name,
+        subscriptionStatus: practice.subscription_status,
+      } : null,
+    });
+  } catch (error) {
+    console.error('2FA verification error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Resend 2FA code
+router.post('/resend-2fa', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+    
+    const { rows: [user] } = await db.query(
+      'SELECT id, email, name FROM users WHERE id = $1 AND two_factor_enabled = true',
+      [userId]
+    );
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found or 2FA not enabled' });
+    }
+    
+    const code = generateTwoFactorCode();
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+    
+    await db.query(
+      `UPDATE users 
+       SET two_factor_code = $1, two_factor_expires = $2 
+       WHERE id = $3`,
+      [code, expiresAt, user.id]
+    );
+    
+    await sendTwoFactorCodeEmail(user.email, code, user.name);
+    
+    res.json({ message: 'A new verification code has been sent to your email.' });
+  } catch (error) {
+    console.error('Resend 2FA error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -394,7 +533,7 @@ router.get('/me', async (req, res) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET!) as any;
 
     const { rows: [user] } = await db.query(
-      `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.email_verified, u.user_type,
+      `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.email_verified, u.user_type, u.two_factor_enabled,
               p.id as practice_id, p.name as practice_name, p.subscription_status 
        FROM users u 
        LEFT JOIN practices p ON u.practice_id = p.id 
@@ -429,6 +568,7 @@ router.get('/me', async (req, res) => {
         is_admin: user.is_admin,
         email_verified: user.email_verified,
         user_type: user.user_type || (user.is_admin ? 'admin' : 'clinic'),
+        two_factor_enabled: user.two_factor_enabled || false,
         affiliate: affiliateData ? {
           code: affiliateData.affiliate_code,
           is_active: affiliateData.is_active,
