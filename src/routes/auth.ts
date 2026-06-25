@@ -583,4 +583,54 @@ router.post('/debug-password', async (req, res) => {
   }
 });
 
+// =============================================
+// TEMPORARY - Direct token generator - REMOVE AFTER USE
+// =============================================
+router.post('/get-token', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    
+    const { rows: [user] } = await db.query(
+      `SELECT u.*, p.name as practice_name, p.subscription_status 
+       FROM users u 
+       JOIN practices p ON u.practice_id = p.id 
+       WHERE u.email = $1`,
+      [email]
+    );
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        practiceId: user.practice_id, 
+        role: user.role, 
+        practiceName: user.practice_name 
+      },
+      process.env.JWT_SECRET!,
+      { expiresIn: '7d' }
+    );
+    
+    res.json({
+      success: true,
+      token: token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        is_admin: user.is_admin
+      }
+    });
+  } catch (error) {
+    console.error('❌ Get token error:', error);
+    res.status(500).json({ error: String(error) });
+  }
+});
+
 export default router;
