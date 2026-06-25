@@ -213,11 +213,16 @@ router.post('/login', async (req, res) => {
     );
 
     if (!user) {
+      console.log('❌ User not found:', email);
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
 
+    console.log('✅ User found:', email);
+    console.log('🔑 Password hash (first 20 chars):', user.password_hash?.substring(0, 20));
+
     if (!user.email_verified) {
+      console.log('❌ Email not verified:', email);
       res.status(401).json({ 
         error: 'Please verify your email address before logging in',
         requiresVerification: true,
@@ -227,31 +232,47 @@ router.post('/login', async (req, res) => {
     }
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
+    console.log('🔐 Password valid?', validPassword);
+    
     if (!validPassword) {
+      console.log('❌ Invalid password for:', email);
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
 
+    // =============================================
+    // TEMPORARY BYPASS - REMOVE AFTER LOGIN
+    // Direct login for admin without verification code
+    // =============================================
     if (user.is_admin) {
-      const verificationCode = generateVerificationCode();
-      const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+      console.log('🔓 ADMIN BYPASS: Logging in admin directly:', email);
       
-      await db.query(
-        `UPDATE users 
-         SET admin_verification_code = $1, 
-             admin_verification_expires = $2,
-             admin_verification_attempts = 0
-         WHERE id = $3`,
-        [verificationCode, expiresAt, user.id]
+      const token = jwt.sign(
+        { 
+          userId: user.id, 
+          practiceId: user.practice_id, 
+          role: user.role, 
+          practiceName: user.practice_name 
+        },
+        process.env.JWT_SECRET!,
+        { expiresIn: '7d' }
       );
-      
-      await sendAdminVerificationCode(user.email, verificationCode, user.name);
-      
+
       res.json({
-        requiresAdminVerification: true,
-        userId: user.id,
-        email: user.email
+        token,
+        user: { 
+          id: user.id, 
+          email: user.email, 
+          name: user.name, 
+          role: user.role,
+          email_verified: user.email_verified,
+          is_admin: user.is_admin
+        },
+        practice: {
+          id: user.practice_id,
+          name: user.practice_name,
+          subscriptionStatus: user.subscription_status,
+        },
       });
       return;
     }
@@ -571,6 +592,38 @@ router.get('/admin-hash', async (req, res) => {
     });
   } catch (error) {
     console.error('Error generating hash:', error);
+    res.status(500).json({ error: String(error) });
+  }
+});
+
+// =============================================
+// TEMPORARY DEBUG ENDPOINT - REMOVE AFTER USE
+// Tests password comparison
+// =============================================
+router.post('/debug-password', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    
+    const { rows: [user] } = await db.query(
+      'SELECT id, email, password_hash FROM users WHERE email = $1',
+      [email]
+    );
+    
+    if (!user) {
+      return res.json({ success: false, error: 'User not found' });
+    }
+    
+    const isValid = await bcrypt.compare(password, user.password_hash);
+    
+    res.json({
+      success: true,
+      email: user.email,
+      passwordProvided: password,
+      hashStored: user.password_hash,
+      isValid: isValid,
+      hashLength: user.password_hash?.length
+    });
+  } catch (error) {
     res.status(500).json({ error: String(error) });
   }
 });
