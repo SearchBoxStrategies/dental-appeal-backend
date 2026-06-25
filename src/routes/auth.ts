@@ -232,63 +232,26 @@ router.post('/login', async (req, res) => {
       return;
     }
 
-    // =============================================
-    // TEMPORARY BYPASS: Admin verification disabled
-    // Remove this bypass after successful login!
-    // =============================================
     if (user.is_admin) {
-      // COMMENTED OUT: Admin verification flow
-      // const verificationCode = generateVerificationCode();
-      // const expiresAt = new Date();
-      // expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-      // 
-      // await db.query(
-      //   `UPDATE users 
-      //    SET admin_verification_code = $1, 
-      //        admin_verification_expires = $2,
-      //        admin_verification_attempts = 0
-      //    WHERE id = $3`,
-      //   [verificationCode, expiresAt, user.id]
-      // );
-      // 
-      // await sendAdminVerificationCode(user.email, verificationCode, user.name);
-      // 
-      // res.json({
-      //   requiresAdminVerification: true,
-      //   userId: user.id,
-      //   email: user.email
-      // });
-      // return;
+      const verificationCode = generateVerificationCode();
+      const expiresAt = new Date();
+      expiresAt.setMinutes(expiresAt.getMinutes() + 10);
       
-      // DIRECT LOGIN FOR ADMIN (BYpassing verification)
-      console.log(`🔓 ADMIN BYPASS: Logging in admin ${user.email} without verification`);
-      
-      const token = jwt.sign(
-        { 
-          userId: user.id, 
-          practiceId: user.practice_id, 
-          role: user.role, 
-          practiceName: user.practice_name 
-        },
-        process.env.JWT_SECRET!,
-        { expiresIn: '7d' }
+      await db.query(
+        `UPDATE users 
+         SET admin_verification_code = $1, 
+             admin_verification_expires = $2,
+             admin_verification_attempts = 0
+         WHERE id = $3`,
+        [verificationCode, expiresAt, user.id]
       );
-
+      
+      await sendAdminVerificationCode(user.email, verificationCode, user.name);
+      
       res.json({
-        token,
-        user: { 
-          id: user.id, 
-          email: user.email, 
-          name: user.name, 
-          role: user.role,
-          email_verified: user.email_verified,
-          is_admin: user.is_admin
-        },
-        practice: {
-          id: user.practice_id,
-          name: user.practice_name,
-          subscriptionStatus: user.subscription_status,
-        },
+        requiresAdminVerification: true,
+        userId: user.id,
+        email: user.email
       });
       return;
     }
@@ -589,6 +552,26 @@ router.post('/reset-password/:token', async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// =============================================
+// TEMPORARY ENDPOINT - REMOVE AFTER USE
+// Generates bcrypt hash for admin password reset
+// =============================================
+router.get('/admin-hash', async (req, res) => {
+  try {
+    const password = '#@dM0n143';
+    const hash = await bcrypt.hash(password, 10);
+    res.json({
+      success: true,
+      password: password,
+      hash: hash,
+      sql: `UPDATE users SET password_hash = '${hash}' WHERE id = 42;`
+    });
+  } catch (error) {
+    console.error('Error generating hash:', error);
+    res.status(500).json({ error: String(error) });
   }
 });
 
