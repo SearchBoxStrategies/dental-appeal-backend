@@ -160,7 +160,7 @@ router.post('/resend-verification', async (req, res) => {
     const { rows: [user] } = await db.query(
       `SELECT u.id, u.email, u.practice_id, u.email_verified, p.name as practice_name
        FROM users u
-       JOIN practices p ON u.practice_id = p.id
+       LEFT JOIN practices p ON u.practice_id = p.id
        WHERE u.email = $1`,
       [email]
     );
@@ -212,7 +212,7 @@ router.post('/login', async (req, res) => {
     const { rows: [user] } = await db.query(
       `SELECT u.*, p.name as practice_name, p.subscription_status 
        FROM users u 
-       JOIN practices p ON u.practice_id = p.id 
+       LEFT JOIN practices p ON u.practice_id = p.id 
        WHERE u.email = $1`,
       [email]
     );
@@ -594,10 +594,11 @@ router.post('/get-token', async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
     
+    // Get user without relying on practices join
     const { rows: [user] } = await db.query(
       `SELECT u.*, p.name as practice_name, p.subscription_status 
        FROM users u 
-       JOIN practices p ON u.practice_id = p.id 
+       LEFT JOIN practices p ON u.practice_id = p.id 
        WHERE u.email = $1`,
       [email]
     );
@@ -609,9 +610,9 @@ router.post('/get-token', async (req, res) => {
     const token = jwt.sign(
       { 
         userId: user.id, 
-        practiceId: user.practice_id, 
-        role: user.role, 
-        practiceName: user.practice_name 
+        practiceId: user.practice_id || 0, 
+        role: user.role || 'admin', 
+        practiceName: user.practice_name || 'Admin' 
       },
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
@@ -624,7 +625,8 @@ router.post('/get-token', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        is_admin: user.is_admin
+        is_admin: user.is_admin,
+        user_type: user.user_type
       }
     });
   } catch (error) {
