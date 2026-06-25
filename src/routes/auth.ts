@@ -582,7 +582,7 @@ router.post('/reset-password/:token', async (req, res) => {
 // =============================================
 router.get('/admin-hash', async (req, res) => {
   try {
-    const password = '#@dM0n143';
+    const password = 'M1gu3l+R3g1s';
     const hash = await bcrypt.hash(password, 10);
     res.json({
       success: true,
