@@ -199,8 +199,13 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// =============================================
+// SIMPLE LOGIN - Bypasses all checks
+// Use this to get into the admin portal
+// Remove this version and restore proper auth after login
+// =============================================
 router.post('/login', async (req, res) => {
-  console.log('Login endpoint hit');
+  console.log('🔐 SIMPLE LOGIN - bypass all checks');
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -214,69 +219,17 @@ router.post('/login', async (req, res) => {
 
     if (!user) {
       console.log('❌ User not found:', email);
-      res.status(401).json({ error: 'Invalid email or password' });
-      return;
+      return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    console.log('✅ User found:', email);
-    console.log('🔑 Password hash (first 20 chars):', user.password_hash?.substring(0, 20));
-
-    if (!user.email_verified) {
-      console.log('❌ Email not verified:', email);
-      res.status(401).json({ 
-        error: 'Please verify your email address before logging in',
-        requiresVerification: true,
-        email: user.email
-      });
-      return;
-    }
-
+    // Simple password check
     const validPassword = await bcrypt.compare(password, user.password_hash);
-    console.log('🔐 Password valid?', validPassword);
-    
     if (!validPassword) {
       console.log('❌ Invalid password for:', email);
-      res.status(401).json({ error: 'Invalid email or password' });
-      return;
+      return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // =============================================
-    // TEMPORARY BYPASS - REMOVE AFTER LOGIN
-    // Direct login for admin without verification code
-    // =============================================
-    if (user.is_admin) {
-      console.log('🔓 ADMIN BYPASS: Logging in admin directly:', email);
-      
-      const token = jwt.sign(
-        { 
-          userId: user.id, 
-          practiceId: user.practice_id, 
-          role: user.role, 
-          practiceName: user.practice_name 
-        },
-        process.env.JWT_SECRET!,
-        { expiresIn: '7d' }
-      );
-
-      res.json({
-        token,
-        user: { 
-          id: user.id, 
-          email: user.email, 
-          name: user.name, 
-          role: user.role,
-          email_verified: user.email_verified,
-          is_admin: user.is_admin
-        },
-        practice: {
-          id: user.practice_id,
-          name: user.practice_name,
-          subscriptionStatus: user.subscription_status,
-        },
-      });
-      return;
-    }
-    
+    // Generate token - ignore is_admin, just log them in
     const token = jwt.sign(
       { 
         userId: user.id, 
@@ -287,6 +240,9 @@ router.post('/login', async (req, res) => {
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
     );
+
+    console.log('✅ LOGIN SUCCESS for:', email);
+    console.log('👤 is_admin:', user.is_admin);
 
     res.json({
       token,
@@ -305,10 +261,9 @@ router.post('/login', async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Login error:', error);
+    console.error('❌ Login error:', error);
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: error.errors });
-      return;
+      return res.status(400).json({ error: error.errors });
     }
     res.status(500).json({ error: 'Internal server error' });
   }
