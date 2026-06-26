@@ -510,3 +510,4 @@ export const sendTwoFactorCodeEmail = async (email: string, code: string, name: 
   await sendEmail({ to: email, subject, html });
   
 };
+};
