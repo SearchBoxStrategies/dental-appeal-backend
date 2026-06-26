@@ -294,7 +294,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Verify 2FA code
+// Verify 2FA code - FIXED to return user data
 router.post('/verify-2fa', async (req, res) => {
   try {
     const { userId, code } = req.body;
@@ -304,7 +304,7 @@ router.post('/verify-2fa', async (req, res) => {
     }
     
     const { rows: [user] } = await db.query(
-      `SELECT id, email, name, two_factor_code, two_factor_expires, practice_id 
+      `SELECT id, email, name, two_factor_code, two_factor_expires, practice_id, is_admin, two_factor_enabled
        FROM users 
        WHERE id = $1 AND two_factor_enabled = true`,
       [userId]
@@ -341,20 +341,21 @@ router.post('/verify-2fa', async (req, res) => {
       { 
         userId: user.id, 
         practiceId: user.practice_id, 
-        role: user.role, 
+        role: user.role || 'admin', 
         practiceName: practice?.name || 'Admin' 
       },
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
     );
     
+    // Return token AND user data
     res.json({
       token,
       user: { 
         id: user.id, 
         email: user.email, 
         name: user.name, 
-        role: user.role,
+        role: user.role || 'admin',
         is_admin: user.is_admin,
         two_factor_enabled: user.two_factor_enabled
       },
