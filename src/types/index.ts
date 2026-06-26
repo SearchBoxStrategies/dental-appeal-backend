@@ -6,7 +6,7 @@ export interface User {
   is_admin?: boolean;
   email_verified?: boolean;
   user_type?: 'clinic' | 'affiliate' | 'admin';
-  two_factor_enabled?: boolean; // ADD THIS LINE
+  two_factor_enabled?: boolean;
   affiliate?: {
     code: string;
     is_active: boolean;
