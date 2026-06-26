@@ -1,4 +1,3 @@
-cat > src/services/email.ts << 'EOF'
 import nodemailer from 'nodemailer';
 
 // Configure email transporter using environment variables
@@ -477,4 +476,3 @@ export const sendTwoFactorCodeEmail = async (email: string, code: string, name: 
 
   await sendEmail({ to: email, subject, html });
 };
-EOF
