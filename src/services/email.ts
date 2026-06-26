@@ -475,4 +475,38 @@ export const sendTwoFactorCodeEmail = async (email: string, code: string, name: 
 
   await sendEmail({ to: email, subject, html });
 
+  // Send 2FA code email
+export const sendTwoFactorCodeEmail = async (email: string, code: string, name: string) => {
+  const subject = 'Your 2FA Verification Code - DentalAppeal';
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>2FA Verification Code</title>
+      <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; }
+        .code { font-size: 36px; font-weight: bold; letter-spacing: 8px; background: #f0f4ff; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0; color: #1e3a5f; }
+        .warning { color: #e67e22; font-size: 12px; text-align: center; margin-top: 20px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Two-Factor Authentication</h2>
+        <p>Hello ${name},</p>
+        <p>Enter the following code to complete your login:</p>
+        <div class="code">${code}</div>
+        <p>This code expires in 10 minutes.</p>
+        <p style="font-size: 12px; color: #666;">If you didn't request this, please ignore this email.</p>
+        <div class="warning">
+          ⚠️ Never share this code with anyone.
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  await sendEmail({ to: email, subject, html });
+  
 };
