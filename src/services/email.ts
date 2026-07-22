@@ -48,7 +48,14 @@ export const sendEmail = async (options: EmailOptions) => {
 
 // Send verification email for new registrations
 export const sendVerificationEmail = async (email: string, token: string, practiceName: string) => {
+  // DEBUG LOGS - Added to track token
+  console.log(`📧 SENDING VERIFICATION EMAIL to ${email}`);
+  console.log(`📧 TOKEN: ${token}`);
+  console.log(`📧 TOKEN LENGTH: ${token.length}`);
+  
   const verificationUrl = `${process.env.BACKEND_URL || 'https://api.dentalappeal.claims'}/api/auth/verify/${token}`;
+  
+  console.log(`📧 VERIFICATION URL: ${verificationUrl}`);
 
   const subject = 'Verify Your DentalAppeal Account';
   const html = `
