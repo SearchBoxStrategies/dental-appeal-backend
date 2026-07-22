@@ -190,7 +190,7 @@ router.post('/resend-verification', async (req, res) => {
       [verificationToken, tokenExpiry, user.id]
     );
     
-    await sendVerificationEmail(email, verificationToken, user.practice_name);
+    await sendVerificationEmail(email, verificationToken, user.practice_name || 'DentalAppeal');
     
     res.json({ message: 'Verification email sent' });
   } catch (error) {
@@ -735,7 +735,6 @@ router.post('/get-token', async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
     
-    // Get user without relying on practices join
     const { rows: [user] } = await db.query(
       `SELECT u.*, p.name as practice_name, p.subscription_status 
        FROM users u 
