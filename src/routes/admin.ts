@@ -15,12 +15,11 @@ router.get('/clients', authenticate, requireAdmin, async (req, res) => {
         u.name,
         u.created_at,
         u.is_admin,
-        u.deleted_at,
         p.name as practice_name,
         p.subscription_status,
         p.stripe_customer_id,
-        (SELECT COUNT(*) FROM claims WHERE created_by = u.id AND deleted_at IS NULL) as total_claims,
-        (SELECT COUNT(*) FROM appeals a JOIN claims c ON a.claim_id = c.id WHERE c.created_by = u.id AND c.deleted_at IS NULL) as total_appeals
+        (SELECT COUNT(*) FROM claims WHERE created_by = u.id) as total_claims,
+        (SELECT COUNT(*) FROM appeals a JOIN claims c ON a.claim_id = c.id WHERE c.created_by = u.id) as total_appeals
       FROM users u
       LEFT JOIN practices p ON u.practice_id = p.id
       WHERE u.is_admin = FALSE AND u.deleted_at IS NULL
@@ -104,7 +103,7 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
         ) as success_rate
       FROM claims c
       LEFT JOIN appeals a ON a.claim_id = c.id
-      WHERE c.created_by = $1 AND c.deleted_at IS NULL
+      WHERE c.created_by = $1
     `, [clientId]);
 
     // Get recent claims with appeal status
@@ -119,12 +118,12 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
         a.created_at as appeal_date
       FROM claims c
       LEFT JOIN appeals a ON a.claim_id = c.id
-      WHERE c.created_by = $1 AND c.deleted_at IS NULL
+      WHERE c.created_by = $1
       ORDER BY c.created_at DESC
       LIMIT 10
     `, [clientId]);
 
-    // Get payment/summary stats (for when Stripe is integrated)
+    // Get payment/summary stats
     const { rows: [paymentStats] } = await db.query(`
       SELECT 
         COALESCE(SUM(amount_paid), 0) as total_paid,
@@ -162,6 +161,7 @@ router.delete('/clients/:id', authenticate, requireAdmin, async (req, res) => {
   const clientId = req.params.id;
   
   try {
+    // Check if client exists and is not already deleted
     const { rows: [client] } = await db.query(
       'SELECT id, email, practice_id FROM users WHERE id = $1 AND is_admin = FALSE AND deleted_at IS NULL',
       [clientId]
@@ -173,7 +173,7 @@ router.delete('/clients/:id', authenticate, requireAdmin, async (req, res) => {
 
     // Soft delete - mark as deleted
     await db.query(
-      'UPDATE users SET deleted_at = NOW(), is_active = false WHERE id = $1',
+      'UPDATE users SET deleted_at = NOW() WHERE id = $1',
       [clientId]
     );
     
@@ -186,7 +186,7 @@ router.delete('/clients/:id', authenticate, requireAdmin, async (req, res) => {
     
     res.json({ 
       success: true, 
-      message: 'Client has been deactivated and marked as deleted. Data can be restored if needed.' 
+      message: 'Client deactivated and marked as deleted successfully' 
     });
   } catch (error) {
     console.error('Soft delete client error:', error);
@@ -199,6 +199,7 @@ router.post('/clients/:id/restore', authenticate, requireAdmin, async (req, res)
   const clientId = req.params.id;
   
   try {
+    // Check if client exists and is deleted
     const { rows: [client] } = await db.query(
       'SELECT id, practice_id FROM users WHERE id = $1 AND deleted_at IS NOT NULL',
       [clientId]
@@ -208,8 +209,9 @@ router.post('/clients/:id/restore', authenticate, requireAdmin, async (req, res)
       return res.status(404).json({ error: 'Client not found or not deleted' });
     }
     
+    // Restore - remove deleted_at
     await db.query(
-      'UPDATE users SET deleted_at = NULL, is_active = true WHERE id = $1',
+      'UPDATE users SET deleted_at = NULL WHERE id = $1',
       [clientId]
     );
     
@@ -267,7 +269,6 @@ router.post('/clients/:id/notes', authenticate, requireAdmin, async (req, res) =
       [clientId, adminId, note]
     );
     
-    // Get author name
     const { rows: [author] } = await db.query(
       'SELECT name FROM users WHERE id = $1',
       [adminId]
@@ -294,10 +295,9 @@ router.delete('/notes/:id', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
-// Get all subscriptions with analytics (for admin only)
+// Get all subscriptions with analytics
 router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
   try {
-    // Get all practices with subscription data
     const { rows: subscriptions } = await db.query(`
       SELECT 
         u.id,
@@ -321,7 +321,6 @@ router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
       ORDER BY u.created_at DESC
     `);
 
-    // Calculate stats
     const activeSubs = subscriptions.filter((s: any) => s.subscription_status === 'active');
     const totalActive = activeSubs.length;
     const mrr = activeSubs.reduce((sum: number, s: any) => sum + (s.amount || 0), 0);
@@ -351,23 +350,19 @@ router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
 // Get analytics data for admin dashboard
 router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
   try {
-    // Get total revenue from payments table
     const { rows: [revenue] } = await db.query(`
       SELECT COALESCE(SUM(amount_paid), 0) as total
       FROM payments
     `);
     
-    // Get active practices count
     const { rows: [activePractices] } = await db.query(`
-      SELECT COUNT(*) as count FROM practices WHERE subscription_status = 'active' AND deleted_at IS NULL
+      SELECT COUNT(*) as count FROM practices WHERE subscription_status = 'active'
     `);
     
-    // Get total appeals across all practices
     const { rows: [appeals] } = await db.query(`
       SELECT COUNT(*) as count FROM appeals
     `);
     
-    // Get overall success rate
     const { rows: [successRate] } = await db.query(`
       SELECT 
         ROUND(
@@ -376,15 +371,12 @@ router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
           1
         ) as rate
       FROM claims c
-      WHERE c.deleted_at IS NULL
     `);
     
-    // Get total clients count
     const { rows: [totalClients] } = await db.query(`
       SELECT COUNT(*) as count FROM users WHERE is_admin = FALSE AND deleted_at IS NULL
     `);
     
-    // Calculate monthly growth
     const { rows: [growth] } = await db.query(`
       SELECT 
         ROUND(
@@ -417,7 +409,6 @@ router.post('/subscriptions/:id/override', authenticate, requireAdmin, async (re
     const { status, reason } = req.body;
     const adminId = req.user!.userId;
     
-    // Get current status
     const { rows: [practice] } = await db.query(
       'SELECT subscription_status FROM practices WHERE id = $1 AND deleted_at IS NULL',
       [practiceId]
@@ -429,7 +420,6 @@ router.post('/subscriptions/:id/override', authenticate, requireAdmin, async (re
     
     const oldStatus = practice.subscription_status;
     
-    // Update status
     await db.query(
       `UPDATE practices 
        SET subscription_status = $1,
@@ -440,7 +430,6 @@ router.post('/subscriptions/:id/override', authenticate, requireAdmin, async (re
       [status, reason, adminId, practiceId]
     );
     
-    // Log history
     await db.query(
       `INSERT INTO subscription_history (practice_id, old_status, new_status, reason, changed_by)
        VALUES ($1, $2, $3, $4, $5)`,
@@ -547,7 +536,6 @@ router.get('/payments', authenticate, requireAdmin, async (req, res) => {
       LIMIT 100
     `);
     
-    // Get totals
     const { rows: [totals] } = await db.query(`
       SELECT 
         COALESCE(SUM(amount_paid), 0) as total_revenue,
@@ -574,7 +562,6 @@ router.get('/payments', authenticate, requireAdmin, async (req, res) => {
 // Get payment summary for dashboard
 router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => {
   try {
-    // This month
     const thisMonthResult = await db.query(`
       SELECT 
         COALESCE(SUM(amount_paid), 0) as total,
@@ -584,7 +571,6 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
         AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
     `);
     
-    // Last month
     const lastMonthResult = await db.query(`
       SELECT 
         COALESCE(SUM(amount_paid), 0) as total,
@@ -625,7 +611,6 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
 // AFFILIATE AUTO-PAYOUT ENDPOINTS
 // ============================================
 
-// Run affiliate auto-payout (requires admin JWT)
 router.post('/run-payout', authenticate, requireAdmin, async (req, res) => {
   try {
     console.log('💰 Affiliate payout triggered by admin:', req.user?.email);
@@ -646,7 +631,6 @@ router.post('/run-payout', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
-// Cron job endpoint with secret key (no JWT required)
 router.post('/cron/payout', async (req, res) => {
   const cronSecret = req.headers['x-cron-secret'];
   const expectedSecret = process.env.CRON_SECRET_KEY;
