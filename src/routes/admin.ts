@@ -129,6 +129,61 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
+// Delete a client and all associated data (admin only)
+router.delete('/clients/:id', authenticate, requireAdmin, async (req, res) => {
+  const clientId = req.params.id;
+  
+  try {
+    // Check if client exists
+    const { rows: [client] } = await db.query(
+      'SELECT id, email, practice_id FROM users WHERE id = $1 AND is_admin = FALSE',
+      [clientId]
+    );
+    
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found' });
+    }
+
+    await db.query('BEGIN');
+
+    // Delete appeals (child of claims)
+    await db.query(
+      `DELETE FROM appeals WHERE claim_id IN (
+        SELECT id FROM claims WHERE created_by = $1
+      )`,
+      [clientId]
+    );
+    
+    // Delete claims
+    await db.query('DELETE FROM claims WHERE created_by = $1', [clientId]);
+    
+    // Delete client notes
+    await db.query('DELETE FROM client_notes WHERE client_id = $1', [clientId]);
+    
+    // Delete payments
+    await db.query('DELETE FROM payments WHERE user_id = $1', [clientId]);
+    
+    // Update practice to deleted status (soft delete)
+    if (client.practice_id) {
+      await db.query(
+        'UPDATE practices SET subscription_status = $1, deleted_at = NOW() WHERE id = $2',
+        ['deleted', client.practice_id]
+      );
+    }
+
+    // Delete the user
+    await db.query('DELETE FROM users WHERE id = $1', [clientId]);
+
+    await db.query('COMMIT');
+    
+    res.json({ success: true, message: 'Client deleted successfully' });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Delete client error:', error);
+    res.status(500).json({ error: 'Failed to delete client' });
+  }
+});
+
 // Get client notes
 router.get('/clients/:id/notes', authenticate, requireAdmin, async (req, res) => {
   try {
