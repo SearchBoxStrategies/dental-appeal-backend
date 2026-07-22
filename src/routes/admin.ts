@@ -5,7 +5,7 @@ import { requireAdmin } from '../middleware/adminAuth';
 
 const router = Router();
 
-// Get all clients (for admin only)
+// Get all active clients (for admin only)
 router.get('/clients', authenticate, requireAdmin, async (req, res) => {
   try {
     const { rows } = await db.query(`
@@ -15,14 +15,15 @@ router.get('/clients', authenticate, requireAdmin, async (req, res) => {
         u.name,
         u.created_at,
         u.is_admin,
+        u.deleted_at,
         p.name as practice_name,
         p.subscription_status,
         p.stripe_customer_id,
-        (SELECT COUNT(*) FROM claims WHERE created_by = u.id) as total_claims,
-        (SELECT COUNT(*) FROM appeals a JOIN claims c ON a.claim_id = c.id WHERE c.created_by = u.id) as total_appeals
+        (SELECT COUNT(*) FROM claims WHERE created_by = u.id AND deleted_at IS NULL) as total_claims,
+        (SELECT COUNT(*) FROM appeals a JOIN claims c ON a.claim_id = c.id WHERE c.created_by = u.id AND c.deleted_at IS NULL) as total_appeals
       FROM users u
       LEFT JOIN practices p ON u.practice_id = p.id
-      WHERE u.is_admin = FALSE
+      WHERE u.is_admin = FALSE AND u.deleted_at IS NULL
       ORDER BY u.created_at DESC
     `);
 
@@ -30,6 +31,32 @@ router.get('/clients', authenticate, requireAdmin, async (req, res) => {
   } catch (error) {
     console.error('Admin clients error:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get deleted clients (for admin to view and restore)
+router.get('/clients/deleted', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT 
+        u.id,
+        u.email,
+        u.name,
+        u.created_at,
+        u.deleted_at,
+        p.name as practice_name,
+        p.subscription_status,
+        (SELECT COUNT(*) FROM claims WHERE created_by = u.id) as total_claims
+      FROM users u
+      LEFT JOIN practices p ON u.practice_id = p.id
+      WHERE u.is_admin = FALSE AND u.deleted_at IS NOT NULL
+      ORDER BY u.deleted_at DESC
+    `);
+    
+    res.json(rows);
+  } catch (error) {
+    console.error('Get deleted clients error:', error);
+    res.status(500).json({ error: 'Failed to fetch deleted clients' });
   }
 });
 
@@ -45,6 +72,7 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
         u.email,
         u.name,
         u.created_at,
+        u.deleted_at,
         p.name as practice_name,
         p.subscription_status,
         p.stripe_customer_id,
@@ -76,7 +104,7 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
         ) as success_rate
       FROM claims c
       LEFT JOIN appeals a ON a.claim_id = c.id
-      WHERE c.created_by = $1
+      WHERE c.created_by = $1 AND c.deleted_at IS NULL
     `, [clientId]);
 
     // Get recent claims with appeal status
@@ -91,7 +119,7 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
         a.created_at as appeal_date
       FROM claims c
       LEFT JOIN appeals a ON a.claim_id = c.id
-      WHERE c.created_by = $1
+      WHERE c.created_by = $1 AND c.deleted_at IS NULL
       ORDER BY c.created_at DESC
       LIMIT 10
     `, [clientId]);
@@ -129,58 +157,73 @@ router.get('/clients/:id', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
-// Delete a client and all associated data (admin only)
+// Soft delete a client (mark as deleted but keep data)
 router.delete('/clients/:id', authenticate, requireAdmin, async (req, res) => {
   const clientId = req.params.id;
   
   try {
-    // Check if client exists
     const { rows: [client] } = await db.query(
-      'SELECT id, email, practice_id FROM users WHERE id = $1 AND is_admin = FALSE',
+      'SELECT id, email, practice_id FROM users WHERE id = $1 AND is_admin = FALSE AND deleted_at IS NULL',
       [clientId]
     );
     
     if (!client) {
-      return res.status(404).json({ error: 'Client not found' });
+      return res.status(404).json({ error: 'Client not found or already deleted' });
     }
 
-    await db.query('BEGIN');
-
-    // Delete appeals (child of claims)
+    // Soft delete - mark as deleted
     await db.query(
-      `DELETE FROM appeals WHERE claim_id IN (
-        SELECT id FROM claims WHERE created_by = $1
-      )`,
+      'UPDATE users SET deleted_at = NOW(), is_active = false WHERE id = $1',
       [clientId]
     );
     
-    // Delete claims
-    await db.query('DELETE FROM claims WHERE created_by = $1', [clientId]);
-    
-    // Delete client notes
-    await db.query('DELETE FROM client_notes WHERE client_id = $1', [clientId]);
-    
-    // Delete payments
-    await db.query('DELETE FROM payments WHERE user_id = $1', [clientId]);
-    
-    // Update practice to deleted status (soft delete)
     if (client.practice_id) {
       await db.query(
         'UPDATE practices SET subscription_status = $1, deleted_at = NOW() WHERE id = $2',
         ['deleted', client.practice_id]
       );
     }
-
-    // Delete the user
-    await db.query('DELETE FROM users WHERE id = $1', [clientId]);
-
-    await db.query('COMMIT');
     
-    res.json({ success: true, message: 'Client deleted successfully' });
+    res.json({ 
+      success: true, 
+      message: 'Client has been deactivated and marked as deleted. Data can be restored if needed.' 
+    });
   } catch (error) {
-    await db.query('ROLLBACK');
-    console.error('Delete client error:', error);
+    console.error('Soft delete client error:', error);
     res.status(500).json({ error: 'Failed to delete client' });
+  }
+});
+
+// Restore a soft-deleted client
+router.post('/clients/:id/restore', authenticate, requireAdmin, async (req, res) => {
+  const clientId = req.params.id;
+  
+  try {
+    const { rows: [client] } = await db.query(
+      'SELECT id, practice_id FROM users WHERE id = $1 AND deleted_at IS NOT NULL',
+      [clientId]
+    );
+    
+    if (!client) {
+      return res.status(404).json({ error: 'Client not found or not deleted' });
+    }
+    
+    await db.query(
+      'UPDATE users SET deleted_at = NULL, is_active = true WHERE id = $1',
+      [clientId]
+    );
+    
+    if (client.practice_id) {
+      await db.query(
+        'UPDATE practices SET subscription_status = $1, deleted_at = NULL WHERE id = $2',
+        ['inactive', client.practice_id]
+      );
+    }
+    
+    res.json({ success: true, message: 'Client restored successfully' });
+  } catch (error) {
+    console.error('Restore client error:', error);
+    res.status(500).json({ error: 'Failed to restore client' });
   }
 });
 
@@ -274,7 +317,7 @@ router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
         p.last_payment_amount
       FROM users u
       LEFT JOIN practices p ON u.practice_id = p.id
-      WHERE u.is_admin = FALSE
+      WHERE u.is_admin = FALSE AND u.deleted_at IS NULL
       ORDER BY u.created_at DESC
     `);
 
@@ -316,7 +359,7 @@ router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
     
     // Get active practices count
     const { rows: [activePractices] } = await db.query(`
-      SELECT COUNT(*) as count FROM practices WHERE subscription_status = 'active'
+      SELECT COUNT(*) as count FROM practices WHERE subscription_status = 'active' AND deleted_at IS NULL
     `);
     
     // Get total appeals across all practices
@@ -333,11 +376,12 @@ router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
           1
         ) as rate
       FROM claims c
+      WHERE c.deleted_at IS NULL
     `);
     
     // Get total clients count
     const { rows: [totalClients] } = await db.query(`
-      SELECT COUNT(*) as count FROM users WHERE is_admin = FALSE
+      SELECT COUNT(*) as count FROM users WHERE is_admin = FALSE AND deleted_at IS NULL
     `);
     
     // Calculate monthly growth
@@ -349,7 +393,7 @@ router.get('/analytics', authenticate, requireAdmin, async (req, res) => {
           1
         ) as rate
       FROM users
-      WHERE is_admin = FALSE
+      WHERE is_admin = FALSE AND deleted_at IS NULL
     `);
     
     res.json({
@@ -375,7 +419,7 @@ router.post('/subscriptions/:id/override', authenticate, requireAdmin, async (re
     
     // Get current status
     const { rows: [practice] } = await db.query(
-      'SELECT subscription_status FROM practices WHERE id = $1',
+      'SELECT subscription_status FROM practices WHERE id = $1 AND deleted_at IS NULL',
       [practiceId]
     );
     
@@ -498,6 +542,7 @@ router.get('/payments', authenticate, requireAdmin, async (req, res) => {
       FROM payments p
       JOIN users u ON p.user_id = u.id
       JOIN practices pr ON u.practice_id = pr.id
+      WHERE u.deleted_at IS NULL
       ORDER BY p.created_at DESC
       LIMIT 100
     `);
@@ -630,7 +675,5 @@ router.post('/cron/payout', async (req, res) => {
     });
   }
 });
-
-// Force restart
 
 export default router;
