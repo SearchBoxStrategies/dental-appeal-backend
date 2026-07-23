@@ -660,4 +660,156 @@ router.post('/cron/payout', async (req, res) => {
   }
 });
 
+// ============================================
+// AFFILIATE MANAGEMENT ENDPOINTS
+// ============================================
+
+// Get all active affiliates (admin only)
+router.get('/affiliates', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT 
+        a.*,
+        u.email as user_email,
+        u.name as user_name,
+        COUNT(DISTINCT ar.id) as referral_count,
+        COUNT(DISTINCT ac.id) as commission_count
+      FROM affiliates a
+      LEFT JOIN users u ON a.user_id = u.id
+      LEFT JOIN affiliate_referrals ar ON a.id = ar.affiliate_id AND ar.deleted_at IS NULL
+      LEFT JOIN affiliate_commissions ac ON ar.id = ac.referral_id AND ac.deleted_at IS NULL
+      WHERE a.deleted_at IS NULL
+      GROUP BY a.id, u.email, u.name
+      ORDER BY a.created_at DESC
+    `);
+    
+    res.json(rows);
+  } catch (error) {
+    console.error('Failed to fetch affiliates:', error);
+    res.status(500).json({ error: 'Failed to fetch affiliates' });
+  }
+});
+
+// Get deleted affiliates (admin only)
+router.get('/affiliates/deleted', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const { rows } = await db.query(`
+      SELECT 
+        a.*,
+        u.email as user_email,
+        u.name as user_name,
+        COUNT(DISTINCT ar.id) as referral_count
+      FROM affiliates a
+      LEFT JOIN users u ON a.user_id = u.id
+      LEFT JOIN affiliate_referrals ar ON a.id = ar.affiliate_id AND ar.deleted_at IS NULL
+      WHERE a.deleted_at IS NOT NULL
+      GROUP BY a.id, u.email, u.name
+      ORDER BY a.deleted_at DESC
+    `);
+    
+    res.json(rows);
+  } catch (error) {
+    console.error('Failed to fetch deleted affiliates:', error);
+    res.status(500).json({ error: 'Failed to fetch deleted affiliates' });
+  }
+});
+
+// Soft delete an affiliate (admin only)
+router.delete('/affiliates/:id', authenticate, requireAdmin, async (req, res) => {
+  const affiliateId = req.params.id;
+  
+  try {
+    // Check if affiliate exists and is not already deleted
+    const { rows: [affiliate] } = await db.query(
+      'SELECT id, email, full_name FROM affiliates WHERE id = $1 AND deleted_at IS NULL',
+      [affiliateId]
+    );
+    
+    if (!affiliate) {
+      return res.status(404).json({ error: 'Affiliate not found or already deleted' });
+    }
+
+    // Start transaction
+    await db.query('BEGIN');
+    
+    // Soft delete the affiliate
+    await db.query(
+      'UPDATE affiliates SET deleted_at = NOW() WHERE id = $1',
+      [affiliateId]
+    );
+    
+    // Soft delete associated referrals (optional)
+    await db.query(
+      'UPDATE affiliate_referrals SET deleted_at = NOW() WHERE affiliate_id = $1 AND deleted_at IS NULL',
+      [affiliateId]
+    );
+    
+    // Soft delete associated commissions (optional)
+    await db.query(
+      'UPDATE affiliate_commissions SET deleted_at = NOW() WHERE referral_id IN (SELECT id FROM affiliate_referrals WHERE affiliate_id = $1) AND deleted_at IS NULL',
+      [affiliateId]
+    );
+    
+    await db.query('COMMIT');
+    
+    res.json({ 
+      success: true, 
+      message: `Affiliate ${affiliate.full_name} has been deactivated and marked as deleted.` 
+    });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Soft delete affiliate error:', error);
+    res.status(500).json({ error: 'Failed to delete affiliate' });
+  }
+});
+
+// Restore a soft-deleted affiliate (admin only)
+router.post('/affiliates/:id/restore', authenticate, requireAdmin, async (req, res) => {
+  const affiliateId = req.params.id;
+  
+  try {
+    // Check if affiliate exists and is deleted
+    const { rows: [affiliate] } = await db.query(
+      'SELECT id, email, full_name FROM affiliates WHERE id = $1 AND deleted_at IS NOT NULL',
+      [affiliateId]
+    );
+    
+    if (!affiliate) {
+      return res.status(404).json({ error: 'Affiliate not found or not deleted' });
+    }
+    
+    // Start transaction
+    await db.query('BEGIN');
+    
+    // Restore the affiliate
+    await db.query(
+      'UPDATE affiliates SET deleted_at = NULL WHERE id = $1',
+      [affiliateId]
+    );
+    
+    // Restore associated referrals (optional)
+    await db.query(
+      'UPDATE affiliate_referrals SET deleted_at = NULL WHERE affiliate_id = $1 AND deleted_at IS NOT NULL',
+      [affiliateId]
+    );
+    
+    // Restore associated commissions (optional)
+    await db.query(
+      'UPDATE affiliate_commissions SET deleted_at = NULL WHERE referral_id IN (SELECT id FROM affiliate_referrals WHERE affiliate_id = $1) AND deleted_at IS NOT NULL',
+      [affiliateId]
+    );
+    
+    await db.query('COMMIT');
+    
+    res.json({ 
+      success: true, 
+      message: `Affiliate ${affiliate.full_name} has been restored successfully.` 
+    });
+  } catch (error) {
+    await db.query('ROLLBACK');
+    console.error('Restore affiliate error:', error);
+    res.status(500).json({ error: 'Failed to restore affiliate' });
+  }
+});
+
 export default router;
