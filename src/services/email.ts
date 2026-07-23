@@ -9,6 +9,9 @@ const transporter = nodemailer.createTransport({
     user: process.env.SMTP_USER || "support@dentalappeal.claims",
     pass: process.env.SMTP_PASS,
   },
+  tls: {
+    rejectUnauthorized: false
+  }
 });
 
 export interface EmailOptions {
@@ -24,6 +27,7 @@ export const sendEmail = async (options: EmailOptions) => {
   console.log(`📧 SMTP_HOST: ${process.env.SMTP_HOST || 'NOT SET'}`);
   console.log(`📧 SMTP_USER: ${process.env.SMTP_USER || 'NOT SET'}`);
   console.log(`📧 SMTP_PORT: ${process.env.SMTP_PORT || 'NOT SET'}`);
+  
   try {
     const info = await transporter.sendMail({
       from: `"DentalAppeal Support" <${process.env.SMTP_USER || "support@dentalappeal.claims"}>`,
@@ -32,9 +36,9 @@ export const sendEmail = async (options: EmailOptions) => {
       html: options.html,
       text: options.text,
     });
-    console.log(`📧 Email sent to ${options.to} (Message ID: ${info.messageId})`);
+    console.log(`✅ Email sent to ${options.to} (Message ID: ${info.messageId})`);
     return true;
-  } catch (error) {
+  } catch (error: any) {
     console.error('❌ Email send error:', error);
     console.error('❌ Error details:', {
       message: error.message,
@@ -46,14 +50,15 @@ export const sendEmail = async (options: EmailOptions) => {
   }
 };
 
-// Send verification email for new registrations
+// ============================================
+// VERIFICATION EMAIL
+// ============================================
 export const sendVerificationEmail = async (email: string, token: string, practiceName: string) => {
-  // DEBUG LOGS - Added to track token
   console.log(`📧 SENDING VERIFICATION EMAIL to ${email}`);
   console.log(`📧 TOKEN: ${token}`);
-  console.log(`📧 TOKEN LENGTH: ${token.length}`);
   
-  const verificationUrl = `${process.env.BACKEND_URL || 'https://api.dentalappeal.claims'}/api/auth/verify/${token}`;
+  // FIX: Use FRONTEND_URL instead of BACKEND_URL
+  const verificationUrl = `${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/verify-email?token=${token}`;
   
   console.log(`📧 VERIFICATION URL: ${verificationUrl}`);
 
@@ -204,40 +209,9 @@ export const sendVerificationEmail = async (email: string, token: string, practi
   await sendEmail({ to: email, subject, html });
 };
 
-export const sendAdminVerificationCode = async (email: string, code: string, name: string) => {
-  const subject = 'Admin Portal Verification Code';
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Admin Verification Code</title>
-      <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
-        .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; }
-        .code { font-size: 32px; font-weight: bold; letter-spacing: 5px; background: #f0f0f0; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0; font-family: monospace; }
-        .warning { color: #e67e22; font-size: 12px; text-align: center; margin-top: 20px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h2>Admin Portal Access</h2>
-        <p>Hello ${name},</p>
-        <p>You are attempting to access the DentalAppeal Admin Portal. Please use the verification code below:</p>
-        <div class="code">${code}</div>
-        <p>This code will expire in 10 minutes.</p>
-        <div class="warning">
-          ⚠️ If you did not request this code, please ignore this email and ensure your account is secure.
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-
-  await sendEmail({ to: email, subject, html });
-};
-
-// Send password reset email
+// ============================================
+// PASSWORD RESET EMAIL
+// ============================================
 export const sendPasswordResetEmail = async (email: string, token: string, name: string) => {
   const resetUrl = `${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/reset-password/${token}`;
 
@@ -254,6 +228,7 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
         .header { text-align: center; margin-bottom: 20px; }
         .button { background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin: 20px 0; }
         .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+        .warning { color: #e67e22; font-size: 12px; text-align: center; margin-top: 20px; }
       </style>
     </head>
     <body>
@@ -267,6 +242,9 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
           <a href="${resetUrl}" class="button">Reset Password</a>
         </div>
         <p style="font-size: 12px; color: #666;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
+        <div class="warning">
+          ⚠️ Never share this link with anyone.
+        </div>
         <div class="footer">
           <p>DentalAppeal — AI-Powered Dental Insurance Appeals</p>
         </div>
@@ -278,7 +256,50 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
   await sendEmail({ to: email, subject, html });
 };
 
-// Send appeal status update email
+// ============================================
+// 2FA CODE EMAIL
+// ============================================
+export const sendTwoFactorCodeEmail = async (email: string, code: string, name: string) => {
+  const subject = 'Your 2FA Verification Code - DentalAppeal';
+  const html = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>2FA Verification Code</title>
+      <style>
+        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; }
+        .code { font-size: 36px; font-weight: bold; letter-spacing: 8px; background: #f0f4ff; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0; color: #1e3a5f; }
+        .warning { color: #e67e22; font-size: 12px; text-align: center; margin-top: 20px; }
+        .footer { text-align: center; margin-top: 30px; color: #666; font-size: 12px; }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h2>Two-Factor Authentication</h2>
+        <p>Hello ${name},</p>
+        <p>Enter the following code to complete your login:</p>
+        <div class="code">${code}</div>
+        <p>This code expires in 10 minutes.</p>
+        <p style="font-size: 12px; color: #666;">If you didn't request this, please ignore this email.</p>
+        <div class="warning">
+          ⚠️ Never share this code with anyone.
+        </div>
+        <div class="footer">
+          <p>DentalAppeal — AI-Powered Dental Insurance Appeals</p>
+        </div>
+      </div>
+    </body>
+    </html>
+  `;
+
+  await sendEmail({ to: email, subject, html });
+};
+
+// ============================================
+// APPEAL STATUS UPDATE EMAIL
+// ============================================
 export const sendAppealStatusUpdate = async (email: string, patientName: string, oldStatus: string, newStatus: string, claimId: number) => {
   const statusLabels: Record<string, string> = {
     draft: 'Draft',
@@ -302,18 +323,20 @@ export const sendAppealStatusUpdate = async (email: string, patientName: string,
           <p><strong>Previous Status:</strong> ${statusLabels[oldStatus] || oldStatus}</p>
           <p><strong>New Status:</strong> ${statusLabels[newStatus] || newStatus}</p>
         </div>
-        <a href="https://app.dentalappeal.claims/claims/${claimId}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Your Appeal</a>
+        <a href="${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/claims/${claimId}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Your Appeal</a>
       </div>
       <div style="text-align: center; padding: 20px; color: #64748b; font-size: 12px;">
         <p>DentalAppeal - AI-Powered Insurance Appeals</p>
-        <p><a href="https://app.dentalappeal.claims/settings/notifications" style="color: #2563eb;">Manage email preferences</a></p>
+        <p><a href="${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/settings/notifications" style="color: #2563eb;">Manage email preferences</a></p>
       </div>
     </div>
   `;
   await sendEmail({ to: email, subject, html });
 };
 
-// Send payment receipt email
+// ============================================
+// PAYMENT RECEIPT EMAIL
+// ============================================
 export const sendPaymentReceipt = async (email: string, amount: number, date: Date, subscriptionId: string) => {
   const subject = `Payment Receipt - $${amount}`;
   const html = `
@@ -328,7 +351,7 @@ export const sendPaymentReceipt = async (email: string, amount: number, date: Da
           <p><strong>Date:</strong> ${date.toLocaleDateString()}</p>
           <p><strong>Plan:</strong> Professional Monthly</p>
         </div>
-        <a href="https://app.dentalappeal.claims/billing" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Billing History</a>
+        <a href="${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/billing" style="background-color: #10b981; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Billing History</a>
       </div>
       <div style="text-align: center; padding: 20px; color: #64748b; font-size: 12px;">
         <p>DentalAppeal - AI-Powered Insurance Appeals</p>
@@ -338,7 +361,9 @@ export const sendPaymentReceipt = async (email: string, amount: number, date: Da
   await sendEmail({ to: email, subject, html });
 };
 
-// Send weekly digest email
+// ============================================
+// WEEKLY DIGEST EMAIL
+// ============================================
 export const sendWeeklyDigest = async (email: string, name: string, stats: {
   newClaims: number;
   newAppeals: number;
@@ -374,7 +399,7 @@ export const sendWeeklyDigest = async (email: string, name: string, stats: {
           </div>
         </div>
         <div style="text-align: center; margin: 30px 0;">
-          <a href="https://app.dentalappeal.claims/analytics" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Full Analytics</a>
+          <a href="${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/analytics" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">View Full Analytics</a>
         </div>
       </div>
       <div style="text-align: center; padding: 20px; color: #64748b; font-size: 12px;">
@@ -385,7 +410,9 @@ export const sendWeeklyDigest = async (email: string, name: string, stats: {
   await sendEmail({ to: email, subject, html });
 };
 
-// Send affiliate verification email
+// ============================================
+// AFFILIATE VERIFICATION EMAIL
+// ============================================
 export const sendAffiliateVerificationEmail = async (email: string, name: string, verificationLink: string) => {
   console.log(`📧 sendAffiliateVerificationEmail called for ${email}`);
   console.log(`📧 Verification link: ${verificationLink}`);
@@ -398,25 +425,40 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
       <title>Verify Your Affiliate Account</title>
+      <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+        .header { background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); padding: 32px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+        .logo-container { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px; }
+        .logo-img { width: 48px; height: 48px; object-fit: contain; }
+        .company-name { font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #1e3a5f, #2563eb); -webkit-background-clip: text; background-clip: text; color: transparent; }
+        .content { padding: 40px 32px; }
+        .greeting { font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 16px; }
+        .message { color: #475569; line-height: 1.6; margin-bottom: 24px; }
+        .button { display: inline-block; padding: 14px 32px; background: #2563eb; color: #ffffff !important; text-decoration: none !important; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2); border: none; cursor: pointer; text-align: center; }
+        .warning-box { background-color: #fef3c7; padding: 16px; border-radius: 8px; margin: 24px 0; font-size: 14px; border-left: 4px solid #f59e0b; }
+        .footer { text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0; background-color: #f8fafc; }
+        .link-fallback { font-size: 12px; color: #64748b; word-break: break-all; background-color: #f1f5f9; padding: 12px; border-radius: 8px; margin-top: 16px; }
+      </style>
     </head>
-    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 0; background-color: #f4f4f4;">
+    <body>
       <div style="padding: 20px;">
-        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
-          <div style="background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%); padding: 32px; text-align: center; border-bottom: 1px solid #e2e8f0;">
-            <div style="display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 8px;">
-              <img src="https://app.dentalappeal.claims/logo.png" alt="DentalAppeal" style="width: 48px; height: 48px; object-fit: contain;" />
-              <span style="font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #1e3a5f, #2563eb); -webkit-background-clip: text; background-clip: text; color: transparent;">DentalAppeal</span>
+        <div class="container">
+          <div class="header">
+            <div class="logo-container">
+              <img src="https://app.dentalappeal.claims/logo.png" alt="DentalAppeal" class="logo-img" />
+              <span class="company-name">DentalAppeal</span>
             </div>
           </div>
-          <div style="padding: 40px 32px;">
-            <div style="font-size: 24px; font-weight: 700; color: #1e293b; margin-bottom: 16px;">Welcome to the DentalAppeal Affiliate Program, ${name}!</div>
-            <p style="color: #475569; line-height: 1.6; margin-bottom: 24px;">
+          <div class="content">
+            <div class="greeting">Welcome to the DentalAppeal Affiliate Program, ${name}!</div>
+            <p class="message">
               Thank you for signing up as an affiliate. Please verify your email address to continue.
             </p>
             <div style="text-align: center; margin: 20px 0;">
-              <a href="${verificationLink}" style="display: inline-block; padding: 14px 32px; background: #2563eb; color: #ffffff !important; text-decoration: none !important; border-radius: 8px; font-weight: 600; font-size: 16px; margin: 16px 0; box-shadow: 0 2px 4px rgba(37,99,235,0.2); border: none; cursor: pointer; text-align: center;" target="_blank">Verify Email & Set Password</a>
+              <a href="${verificationLink}" class="button">Verify Email & Set Password</a>
             </div>
-            <div style="background-color: #fef3c7; padding: 16px; border-radius: 8px; margin: 24px 0; font-size: 14px; border-left: 4px solid #f59e0b;">
+            <div class="warning-box">
               <strong>⚠️ This verification link expires in 24 hours.</strong>
             </div>
             <p style="font-size: 14px; color: #475569;">
@@ -428,13 +470,13 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
                 <li>Connect Stripe for payouts</li>
               </ol>
             </p>
-            <div style="font-size: 12px; color: #64748b; word-break: break-all; background-color: #f1f5f9; padding: 12px; border-radius: 8px; margin-top: 16px;">
+            <div class="link-fallback">
               <strong>Can't click the button?</strong><br>
               Copy and paste this link into your browser:<br>
               <a href="${verificationLink}" style="color: #2563eb; word-break: break-all;">${verificationLink}</a>
             </div>
           </div>
-          <div style="text-align: center; padding: 24px; color: #94a3b8; font-size: 12px; border-top: 1px solid #e2e8f0; background-color: #f8fafc;">
+          <div class="footer">
             <p><strong>DentalAppeal</strong> — AI-Powered Dental Insurance Appeals</p>
             <p>&copy; 2026 Search Box Strategies. All rights reserved.</p>
           </div>
@@ -447,39 +489,4 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
   const result = await sendEmail({ to: email, subject, html });
   console.log(`📧 sendAffiliateVerificationEmail result for ${email}: ${result ? 'SUCCESS' : 'FAILED'}`);
   return result;
-};
-
-// Send 2FA code email
-export const sendTwoFactorCodeEmail = async (email: string, code: string, name: string) => {
-  const subject = 'Your 2FA Verification Code - DentalAppeal';
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>2FA Verification Code</title>
-      <style>
-        body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
-        .container { max-width: 500px; margin: 0 auto; background: white; border-radius: 12px; padding: 30px; }
-        .code { font-size: 36px; font-weight: bold; letter-spacing: 8px; background: #f0f4ff; padding: 20px; text-align: center; border-radius: 8px; margin: 20px 0; color: #1e3a5f; }
-        .warning { color: #e67e22; font-size: 12px; text-align: center; margin-top: 20px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <h2>Two-Factor Authentication</h2>
-        <p>Hello ${name},</p>
-        <p>Enter the following code to complete your login:</p>
-        <div class="code">${code}</div>
-        <p>This code expires in 10 minutes.</p>
-        <p style="font-size: 12px; color: #666;">If you didn't request this, please ignore this email.</p>
-        <div class="warning">
-          ⚠️ Never share this code with anyone.
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-
-  await sendEmail({ to: email, subject, html });
 };
