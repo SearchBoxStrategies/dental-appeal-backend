@@ -250,6 +250,7 @@ router.post('/login', async (req, res) => {
         requiresTwoFactor: true,
         userId: user.id,
         email: user.email,
+        is_admin: user.is_admin, // ADDED: Required for frontend redirect
         message: 'A verification code has been sent to your email.'
       });
     }
