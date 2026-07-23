@@ -204,7 +204,7 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-// Login with 2FA support
+// Login with 2FA support (2FA only for admin users)
 router.post('/login', async (req, res) => {
   console.log('🔐 LOGIN - with 2FA support');
   try {
@@ -229,8 +229,8 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Check if 2FA is enabled for this user
-    if (user.two_factor_enabled) {
+    // Check if 2FA is enabled for this user (ONLY for admin users)
+    if (user.two_factor_enabled && user.is_admin) {
       const code = generateTwoFactorCode();
       const expiresAt = new Date();
       expiresAt.setMinutes(expiresAt.getMinutes() + 10);
