@@ -68,8 +68,8 @@ router.post('/register', async (req, res) => {
         const { rows: [practice] } = await client.query(
           `INSERT INTO practices (name, email, subscription_status, referred_by_affiliate_id, referral_code_used) 
            VALUES ($1, $2, 'trial', $3, $4) RETURNING id`,
-          [practiceName, email.toLowerCase(), referredByAffiliateId, referralCode]
-        );
+      [practiceName, email, referredByAffiliateId, referralCode]
+);
         practiceId = practice.id;
         
         if (referredByAffiliateId) {
