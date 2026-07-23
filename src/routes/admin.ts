@@ -234,7 +234,7 @@ router.post('/clients/:id/restore', authenticate, requireAdmin, async (req, res)
 });
 
 // ============================================
-// NEW: HARD DELETE - Permanently delete client
+// HARD DELETE - Permanently delete client
 // ============================================
 router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, res) => {
   const clientId = req.params.id;
@@ -280,7 +280,6 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
         (SELECT COUNT(*) FROM client_notes WHERE client_id = $1) as notes,
         (SELECT COUNT(*) FROM payments WHERE user_id = $1) as payments,
         (SELECT COUNT(*) FROM subscription_history WHERE practice_id = $2) as sub_history,
-        (SELECT COUNT(*) FROM documents WHERE user_id = $1) as documents,
         (SELECT COUNT(*) FROM affiliate_referrals WHERE practice_id = $2) as referrals
       `,
       [clientId, user.practice_id]
@@ -294,31 +293,25 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
       [clientId]
     );
     
-    // 2. Delete documents
-    const { rowCount: documentsDeleted } = await client.query(
-      'DELETE FROM documents WHERE user_id = $1',
-      [clientId]
-    );
-    
-    // 3. Delete appeals (through claims)
+    // 2. Delete appeals (through claims)
     const { rowCount: appealsDeleted } = await client.query(
       'DELETE FROM appeals WHERE claim_id IN (SELECT id FROM claims WHERE created_by = $1)',
       [clientId]
     );
     
-    // 4. Delete claims
+    // 3. Delete claims
     const { rowCount: claimsDeleted } = await client.query(
       'DELETE FROM claims WHERE created_by = $1',
       [clientId]
     );
     
-    // 5. Delete subscription history
+    // 4. Delete subscription history
     const { rowCount: subHistoryDeleted } = await client.query(
       'DELETE FROM subscription_history WHERE practice_id = $1',
       [user.practice_id]
     );
     
-    // 6. Handle payments
+    // 5. Handle payments
     let paymentsDeleted = 0;
     if (deletePayments === true) {
       const result = await client.query(
@@ -339,7 +332,7 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
       );
     }
     
-    // 7. Delete any affiliate referrals
+    // 6. Delete any affiliate referrals
     if (user.practice_id) {
       await client.query(
         'DELETE FROM affiliate_referrals WHERE practice_id = $1',
@@ -347,13 +340,13 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
       );
     }
     
-    // 8. Delete the user
+    // 7. Delete the user
     const { rowCount: userDeleted } = await client.query(
       'DELETE FROM users WHERE id = $1',
       [clientId]
     );
     
-    // 9. Delete the practice
+    // 8. Delete the practice
     let practiceDeleted = 0;
     if (user.practice_id) {
       const result = await client.query(
@@ -363,7 +356,7 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
       practiceDeleted = result.rowCount;
     }
     
-    // 10. Record audit log
+    // 9. Record audit log
     await client.query(
       `INSERT INTO admin_audit_logs (
         admin_id, 
@@ -413,7 +406,6 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
           claims: claimsDeleted,
           appeals: appealsDeleted,
           notes: notesDeleted,
-          documents: documentsDeleted,
           payments: deletePayments ? paymentsDeleted : 'Anonymized',
           subscription_history: subHistoryDeleted,
           practice: practiceDeleted,
@@ -435,7 +427,7 @@ router.delete('/clients/:id/permanent', authenticate, requireAdmin, async (req, 
 });
 
 // ============================================
-// NEW: PREVIEW DELETION IMPACT
+// PREVIEW DELETION IMPACT
 // ============================================
 router.get('/clients/:id/delete-preview', authenticate, requireAdmin, async (req, res) => {
   try {
@@ -461,7 +453,6 @@ router.get('/clients/:id/delete-preview', authenticate, requireAdmin, async (req
         (SELECT COUNT(*) FROM client_notes WHERE client_id = $1) as notes,
         (SELECT COUNT(*) FROM payments WHERE user_id = $1) as payments,
         (SELECT COUNT(*) FROM subscription_history WHERE practice_id = $2) as sub_history,
-        (SELECT COUNT(*) FROM documents WHERE user_id = $1) as documents,
         (SELECT COUNT(*) FROM affiliate_referrals WHERE practice_id = $2) as referrals
       `,
       [clientId, user.practice_id]
@@ -511,7 +502,7 @@ router.get('/clients/:id/delete-preview', authenticate, requireAdmin, async (req
 });
 
 // ============================================
-// NEW: BULK HARD DELETE
+// BULK HARD DELETE
 // ============================================
 router.post('/clients/bulk-delete', authenticate, requireAdmin, async (req, res) => {
   const client = await db.connect();
@@ -549,7 +540,6 @@ router.post('/clients/bulk-delete', authenticate, requireAdmin, async (req, res)
       appeals: 0,
       payments: 0,
       notes: 0,
-      documents: 0,
       sub_history: 0,
       referrals: 0
     };
@@ -565,7 +555,6 @@ router.post('/clients/bulk-delete', authenticate, requireAdmin, async (req, res)
       
       // Delete associated data
       await client.query('DELETE FROM client_notes WHERE client_id = $1', [user.id]);
-      await client.query('DELETE FROM documents WHERE user_id = $1', [user.id]);
       await client.query('DELETE FROM appeals WHERE claim_id IN (SELECT id FROM claims WHERE created_by = $1)', [user.id]);
       
       const claimsResult = await client.query('DELETE FROM claims WHERE created_by = $1', [user.id]);
