@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import crypto from 'crypto';
 import { db } from '../db';
-import { sendVerificationEmail, sendPasswordResetEmail, sendAdminVerificationCode, sendTwoFactorCodeEmail } from '../services/email';
+import { sendVerificationEmail, sendPasswordResetEmail, sendTwoFactorCodeEmail } from '../services/email';
 
 const router = Router();
 
@@ -26,8 +26,11 @@ const registerSchema = z.object({
   referralCode: z.string().optional(),
 });
 
+// ============================================
+// REGISTRATION - Creates clinic accounts only
+// ============================================
 router.post('/register', async (req, res) => {
-  console.log('Register endpoint hit');
+  console.log('📝 Register endpoint hit');
   try {
     const { practiceName, name, email, password, referralCode } = registerSchema.parse(req.body);
     const passwordHash = await bcrypt.hash(password, 10);
@@ -56,7 +59,7 @@ router.post('/register', async (req, res) => {
       let practiceId;
       const { rows: existingPractice } = await client.query(
         'SELECT id FROM practices WHERE email = $1',
-        [email]
+        [email.toLowerCase()]
       );
       
       if (existingPractice.length > 0) {
@@ -64,8 +67,8 @@ router.post('/register', async (req, res) => {
       } else {
         const { rows: [practice] } = await client.query(
           `INSERT INTO practices (name, email, subscription_status, referred_by_affiliate_id, referral_code_used) 
-           VALUES ($1, $2, 'inactive', $3, $4) RETURNING id`,
-          [practiceName, email, referredByAffiliateId, referralCode]
+           VALUES ($1, $2, 'trial', $3, $4) RETURNING id`,
+          [practiceName, email.toLowerCase(), referredByAffiliateId, referralCode]
         );
         practiceId = practice.id;
         
@@ -81,24 +84,38 @@ router.post('/register', async (req, res) => {
       const tokenExpiry = new Date();
       tokenExpiry.setHours(tokenExpiry.getHours() + 24);
 
+      // FIX: Create as clinic user, NOT admin
       const { rows: [user] } = await client.query(
-        `INSERT INTO users (practice_id, email, password_hash, name, role, verification_token, verification_token_expires)
-         VALUES ($1, $2, $3, $4, 'admin', $5, $6) 
-         ON CONFLICT (practice_id, email) DO UPDATE SET 
-           name = $4, 
-           password_hash = $3,
-           verification_token = $5,
-           verification_token_expires = $6
-         RETURNING id, email, name, role, verification_token`,
-        [practiceId, email, passwordHash, name, verificationToken, tokenExpiry]
+        `INSERT INTO users (
+          practice_id, email, password_hash, name, role, is_admin, 
+          verification_token, verification_token_expires, email_verified
+        ) VALUES ($1, $2, $3, $4, 'clinic', false, $5, $6, false)
+        ON CONFLICT (practice_id, email) DO UPDATE SET 
+          name = $4, 
+          password_hash = $3,
+          role = 'clinic',
+          is_admin = false,
+          verification_token = $5,
+          verification_token_expires = $6
+        RETURNING id, email, name, role, is_admin, verification_token`,
+        [practiceId, email.toLowerCase(), passwordHash, name, verificationToken, tokenExpiry]
       );
 
       await client.query('COMMIT');
+      
+      // Send verification email
       await sendVerificationEmail(email, verificationToken, practiceName);
 
       res.status(201).json({
+        success: true,
         message: 'Registration successful. Please check your email to verify your account.',
-        email: user.email,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          is_admin: user.is_admin
+        },
         requiresVerification: true
       });
     } catch (err) {
@@ -108,20 +125,21 @@ router.post('/register', async (req, res) => {
       client.release();
     }
   } catch (error) {
-    console.error('Registration error:', error);
+    console.error('❌ Registration error:', error);
     if (error instanceof z.ZodError) {
-      res.status(400).json({ error: error.errors });
-      return;
+      return res.status(400).json({ error: error.errors });
     }
     const err = error as any;
     if (err.code === '23505') {
-      res.status(409).json({ error: 'Email already registered' });
-      return;
+      return res.status(409).json({ error: 'Email already registered' });
     }
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
+// ============================================
+// EMAIL VERIFICATION
+// ============================================
 router.get('/verify/:token', async (req, res) => {
   try {
     const { token } = req.params;
@@ -134,11 +152,17 @@ router.get('/verify/:token', async (req, res) => {
     );
     
     if (!user) {
-      return res.status(400).json({ error: 'Invalid or expired verification link' });
+      return res.status(400).json({ 
+        error: 'Invalid or expired verification link',
+        message: 'Please request a new verification email'
+      });
     }
     
     if (new Date() > user.verification_token_expires) {
-      return res.status(400).json({ error: 'Verification link has expired. Please request a new one.' });
+      return res.status(400).json({ 
+        error: 'Verification link has expired',
+        message: 'Please request a new verification email'
+      });
     }
     
     await db.query(
@@ -151,23 +175,31 @@ router.get('/verify/:token', async (req, res) => {
       [user.id]
     );
     
-    res.redirect(`${process.env.FRONTEND_URL}/login?verified=true`);
+    // Redirect to frontend with success
+    res.redirect(`${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/login?verified=true`);
   } catch (error) {
-    console.error(error);
+    console.error('❌ Verification error:', error);
     res.status(500).json({ error: 'Verification failed' });
   }
 });
 
+// ============================================
+// RESEND VERIFICATION
+// ============================================
 router.post('/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
     
     const { rows: [user] } = await db.query(
       `SELECT u.id, u.email, u.practice_id, u.email_verified, p.name as practice_name
        FROM users u
        LEFT JOIN practices p ON u.practice_id = p.id
        WHERE u.email = $1`,
-      [email]
+      [email.toLowerCase()]
     );
     
     if (!user) {
@@ -192,21 +224,26 @@ router.post('/resend-verification', async (req, res) => {
     
     await sendVerificationEmail(email, verificationToken, user.practice_name || 'DentalAppeal');
     
-    res.json({ message: 'Verification email sent' });
+    res.json({ 
+      success: true,
+      message: 'Verification email sent successfully' 
+    });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Resend verification error:', error);
     res.status(500).json({ error: 'Failed to resend verification email' });
   }
 });
 
+// ============================================
+// LOGIN - With 2FA for Admin Only
+// ============================================
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
 });
 
-// Login with 2FA support (2FA only for admin users)
 router.post('/login', async (req, res) => {
-  console.log('🔐 LOGIN - with 2FA support');
+  console.log('🔐 LOGIN request received');
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -215,12 +252,21 @@ router.post('/login', async (req, res) => {
        FROM users u 
        LEFT JOIN practices p ON u.practice_id = p.id 
        WHERE u.email = $1`,
-      [email]
+      [email.toLowerCase().trim()]
     );
 
     if (!user) {
       console.log('❌ User not found:', email);
       return res.status(401).json({ error: 'Invalid email or password' });
+    }
+
+    // Check if email is verified (skip for admin)
+    if (!user.email_verified && !user.is_admin) {
+      return res.status(403).json({ 
+        error: 'Please verify your email before logging in',
+        requiresVerification: true,
+        email: user.email
+      });
     }
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
@@ -229,8 +275,8 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Check if 2FA is enabled for this user (ONLY for admin users)
-    if (user.two_factor_enabled && user.is_admin) {
+    // ONLY ADMIN gets 2FA
+    if (user.is_admin === true && user.two_factor_enabled === true) {
       const code = generateTwoFactorCode();
       const expiresAt = new Date();
       expiresAt.setMinutes(expiresAt.getMinutes() + 10);
@@ -250,18 +296,19 @@ router.post('/login', async (req, res) => {
         requiresTwoFactor: true,
         userId: user.id,
         email: user.email,
-        is_admin: user.is_admin, // ADDED: Required for frontend redirect
+        is_admin: true,
         message: 'A verification code has been sent to your email.'
       });
     }
 
-    // If 2FA is not enabled, continue with normal login
+    // Regular login (clinic users or admin with 2FA disabled)
     const token = jwt.sign(
       { 
         userId: user.id, 
         practiceId: user.practice_id, 
-        role: user.role, 
-        practiceName: user.practice_name 
+        role: user.role || 'clinic',
+        practiceName: user.practice_name,
+        isAdmin: user.is_admin || false
       },
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
@@ -275,16 +322,16 @@ router.post('/login', async (req, res) => {
         id: user.id, 
         email: user.email, 
         name: user.name, 
-        role: user.role,
+        role: user.role || 'clinic',
         email_verified: user.email_verified,
-        is_admin: user.is_admin,
-        two_factor_enabled: user.two_factor_enabled
+        is_admin: user.is_admin || false,
+        two_factor_enabled: user.two_factor_enabled || false
       },
-      practice: {
+      practice: user.practice_id ? {
         id: user.practice_id,
         name: user.practice_name,
         subscriptionStatus: user.subscription_status,
-      },
+      } : null,
     });
   } catch (error) {
     console.error('❌ Login error:', error);
@@ -295,7 +342,9 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Verify 2FA code - FIXED to return user data
+// ============================================
+// VERIFY 2FA - Admin only
+// ============================================
 router.post('/verify-2fa', async (req, res) => {
   try {
     const { userId, code } = req.body;
@@ -307,12 +356,12 @@ router.post('/verify-2fa', async (req, res) => {
     const { rows: [user] } = await db.query(
       `SELECT id, email, name, two_factor_code, two_factor_expires, practice_id, is_admin, two_factor_enabled
        FROM users 
-       WHERE id = $1 AND two_factor_enabled = true`,
+       WHERE id = $1 AND is_admin = true AND two_factor_enabled = true`,
       [userId]
     );
     
     if (!user) {
-      return res.status(404).json({ error: 'User not found or 2FA not enabled' });
+      return res.status(404).json({ error: 'Admin user not found or 2FA not enabled' });
     }
     
     if (!user.two_factor_code || new Date() > user.two_factor_expires) {
@@ -342,22 +391,23 @@ router.post('/verify-2fa', async (req, res) => {
       { 
         userId: user.id, 
         practiceId: user.practice_id, 
-        role: user.role || 'admin', 
-        practiceName: practice?.name || 'Admin' 
+        role: 'admin',
+        practiceName: practice?.name || 'Admin',
+        isAdmin: true
       },
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
     );
     
-    // Return token AND user data
     res.json({
+      success: true,
       token,
       user: { 
         id: user.id, 
         email: user.email, 
         name: user.name, 
-        role: user.role || 'admin',
-        is_admin: user.is_admin,
+        role: 'admin',
+        is_admin: true,
         two_factor_enabled: user.two_factor_enabled
       },
       practice: practice ? {
@@ -367,12 +417,14 @@ router.post('/verify-2fa', async (req, res) => {
       } : null,
     });
   } catch (error) {
-    console.error('2FA verification error:', error);
+    console.error('❌ 2FA verification error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Resend 2FA code
+// ============================================
+// RESEND 2FA CODE - Admin only
+// ============================================
 router.post('/resend-2fa', async (req, res) => {
   try {
     const { userId } = req.body;
@@ -382,12 +434,12 @@ router.post('/resend-2fa', async (req, res) => {
     }
     
     const { rows: [user] } = await db.query(
-      'SELECT id, email, name FROM users WHERE id = $1 AND two_factor_enabled = true',
+      'SELECT id, email, name FROM users WHERE id = $1 AND is_admin = true AND two_factor_enabled = true',
       [userId]
     );
     
     if (!user) {
-      return res.status(404).json({ error: 'User not found or 2FA not enabled' });
+      return res.status(404).json({ error: 'Admin user not found or 2FA not enabled' });
     }
     
     const code = generateTwoFactorCode();
@@ -403,132 +455,24 @@ router.post('/resend-2fa', async (req, res) => {
     
     await sendTwoFactorCodeEmail(user.email, code, user.name);
     
-    res.json({ message: 'A new verification code has been sent to your email.' });
-  } catch (error) {
-    console.error('Resend 2FA error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-router.post('/verify-admin-code', async (req, res) => {
-  try {
-    const { userId, code } = req.body;
-    
-    const { rows: [user] } = await db.query(
-      `SELECT id, email, name, admin_verification_code, admin_verification_expires, 
-              admin_verification_attempts, practice_id
-       FROM users 
-       WHERE id = $1 AND is_admin = TRUE`,
-      [userId]
-    );
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found or not an admin' });
-    }
-    
-    if (user.admin_verification_attempts >= 5) {
-      return res.status(400).json({ error: 'Too many failed attempts. Please request a new code.' });
-    }
-    
-    if (!user.admin_verification_code || new Date() > user.admin_verification_expires) {
-      return res.status(400).json({ error: 'Verification code expired. Please request a new one.' });
-    }
-    
-    if (user.admin_verification_code !== code) {
-      await db.query(
-        'UPDATE users SET admin_verification_attempts = admin_verification_attempts + 1 WHERE id = $1',
-        [userId]
-      );
-      return res.status(400).json({ error: 'Invalid verification code' });
-    }
-    
-    await db.query(
-      `UPDATE users 
-       SET admin_verification_code = NULL, 
-           admin_verification_expires = NULL,
-           admin_verification_attempts = 0
-       WHERE id = $1`,
-      [userId]
-    );
-    
-    const { rows: [practice] } = await db.query(
-      'SELECT name, subscription_status FROM practices WHERE id = $1',
-      [user.practice_id]
-    );
-    
-    const token = jwt.sign(
-      { 
-        userId: user.id, 
-        practiceId: user.practice_id, 
-        role: 'admin', 
-        practiceName: practice.name 
-      },
-      process.env.JWT_SECRET!,
-      { expiresIn: '7d' }
-    );
-    
-    res.json({
-      token,
-      user: { 
-        id: user.id, 
-        email: user.email, 
-        name: user.name, 
-        role: 'admin',
-        is_admin: true
-      },
-      practice: {
-        id: user.practice_id,
-        name: practice.name,
-        subscriptionStatus: practice.subscription_status,
-      },
+    res.json({ 
+      success: true,
+      message: 'A new verification code has been sent to your email.' 
     });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Resend 2FA error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-router.post('/resend-admin-code', async (req, res) => {
-  try {
-    const { userId } = req.body;
-    
-    const { rows: [user] } = await db.query(
-      'SELECT id, email, name FROM users WHERE id = $1 AND is_admin = TRUE',
-      [userId]
-    );
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    const verificationCode = generateVerificationCode();
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-    
-    await db.query(
-      `UPDATE users 
-       SET admin_verification_code = $1, 
-           admin_verification_expires = $2,
-           admin_verification_attempts = 0
-       WHERE id = $3`,
-      [verificationCode, expiresAt, user.id]
-    );
-    
-    await sendAdminVerificationCode(user.email, verificationCode, user.name);
-    
-    res.json({ message: 'Verification code sent' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to resend code' });
-  }
-});
-
+// ============================================
+// GET CURRENT USER
+// ============================================
 router.get('/me', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
-      res.status(401).json({ error: 'No token provided' });
-      return;
+      return res.status(401).json({ error: 'No token provided' });
     }
 
     const token = authHeader.split(' ')[1];
@@ -544,8 +488,7 @@ router.get('/me', async (req, res) => {
     );
 
     if (!user) {
-      res.status(404).json({ error: 'User not found' });
-      return;
+      return res.status(404).json({ error: 'User not found' });
     }
 
     // Get affiliate data if user is an affiliate
@@ -593,28 +536,32 @@ router.get('/me', async (req, res) => {
       } : null,
     });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Get me error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
+// ============================================
+// FORGOT PASSWORD
+// ============================================
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
     
     if (!email) {
-      res.status(400).json({ error: 'Email is required' });
-      return;
+      return res.status(400).json({ error: 'Email is required' });
     }
     
     const { rows: users } = await db.query(
       'SELECT id, email, name FROM users WHERE email = $1',
-      [email]
+      [email.toLowerCase()]
     );
     
     if (users.length === 0) {
-      res.json({ message: 'If an account exists, a reset link has been sent' });
-      return;
+      return res.json({ 
+        success: true,
+        message: 'If an account exists, a reset link has been sent' 
+      });
     }
     
     const user = users[0];
@@ -629,21 +576,26 @@ router.post('/forgot-password', async (req, res) => {
     
     await sendPasswordResetEmail(email, resetToken, user.name);
     
-    res.json({ message: 'If an account exists, a reset link has been sent' });
+    res.json({ 
+      success: true,
+      message: 'If an account exists, a reset link has been sent' 
+    });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Forgot password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
+// ============================================
+// RESET PASSWORD
+// ============================================
 router.post('/reset-password/:token', async (req, res) => {
   try {
     const { token } = req.params;
     const { password } = req.body;
     
     if (!password || password.length < 6) {
-      res.status(400).json({ error: 'Password must be at least 6 characters' });
-      return;
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
     
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
@@ -654,8 +606,7 @@ router.post('/reset-password/:token', async (req, res) => {
     );
     
     if (users.length === 0) {
-      res.status(400).json({ error: 'Invalid or expired token' });
-      return;
+      return res.status(400).json({ error: 'Invalid or expired token' });
     }
     
     const user = users[0];
@@ -666,68 +617,19 @@ router.post('/reset-password/:token', async (req, res) => {
       [hashedPassword, user.id]
     );
     
-    res.json({ message: 'Password has been reset successfully' });
+    res.json({ 
+      success: true,
+      message: 'Password has been reset successfully' 
+    });
   } catch (error) {
-    console.error(error);
+    console.error('❌ Reset password error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// =============================================
-// TEMPORARY ENDPOINT - REMOVE AFTER USE
-// Generates bcrypt hash for admin password reset
-// =============================================
-router.get('/admin-hash', async (req, res) => {
-  try {
-    const password = 'M1gu3l+R3g1s';
-    const hash = await bcrypt.hash(password, 10);
-    res.json({
-      success: true,
-      password: password,
-      hash: hash,
-      sql: `UPDATE users SET password_hash = '${hash}' WHERE id = 42;`
-    });
-  } catch (error) {
-    console.error('Error generating hash:', error);
-    res.status(500).json({ error: String(error) });
-  }
-});
-
-// =============================================
-// TEMPORARY DEBUG ENDPOINT - REMOVE AFTER USE
-// Tests password comparison
-// =============================================
-router.post('/debug-password', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-    
-    const { rows: [user] } = await db.query(
-      'SELECT id, email, password_hash FROM users WHERE email = $1',
-      [email]
-    );
-    
-    if (!user) {
-      return res.json({ success: false, error: 'User not found' });
-    }
-    
-    const isValid = await bcrypt.compare(password, user.password_hash);
-    
-    res.json({
-      success: true,
-      email: user.email,
-      passwordProvided: password,
-      hashStored: user.password_hash,
-      isValid: isValid,
-      hashLength: user.password_hash?.length
-    });
-  } catch (error) {
-    res.status(500).json({ error: String(error) });
-  }
-});
-
-// =============================================
-// TEMPORARY - Direct token generator - REMOVE AFTER USE
-// =============================================
+// ============================================
+// EMERGENCY TOKEN ENDPOINT - REMOVE AFTER FIX
+// ============================================
 router.post('/get-token', async (req, res) => {
   try {
     const { email } = req.body;
@@ -741,7 +643,7 @@ router.post('/get-token', async (req, res) => {
        FROM users u 
        LEFT JOIN practices p ON u.practice_id = p.id 
        WHERE u.email = $1`,
-      [email]
+      [email.toLowerCase()]
     );
     
     if (!user) {
@@ -753,7 +655,8 @@ router.post('/get-token', async (req, res) => {
         userId: user.id, 
         practiceId: user.practice_id || 0, 
         role: user.role || 'admin', 
-        practiceName: user.practice_name || 'Admin' 
+        practiceName: user.practice_name || 'Admin',
+        isAdmin: user.is_admin || false
       },
       process.env.JWT_SECRET!,
       { expiresIn: '7d' }
@@ -766,7 +669,8 @@ router.post('/get-token', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        is_admin: user.is_admin,
+        is_admin: user.is_admin || false,
+        role: user.role,
         user_type: user.user_type
       }
     });
