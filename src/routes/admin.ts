@@ -469,7 +469,14 @@ router.get('/clients/:id/delete-preview', authenticate, requireAdmin, async (req
       [clientId]
     );
     
-    const totalRecords = Object.values(counts.rows[0]).reduce((a, b) => a + parseInt(b || '0'), 0);
+    // FIX: Properly type and calculate total records
+    const impact = counts.rows[0];
+    const totalRecords = Number(impact.claims || 0) + 
+                        Number(impact.appeals || 0) + 
+                        Number(impact.notes || 0) + 
+                        Number(impact.payments || 0) + 
+                        Number(impact.sub_history || 0) + 
+                        Number(impact.referrals || 0);
     
     res.json({
       success: true,
@@ -482,7 +489,7 @@ router.get('/clients/:id/delete-preview', authenticate, requireAdmin, async (req
           subscription_status: user.subscription_status,
           created_at: user.created_at
         },
-        deletion_impact: counts.rows[0],
+        deletion_impact: impact,
         samples: {
           claims: sampleClaims,
           payments: samplePayments
@@ -490,8 +497,8 @@ router.get('/clients/:id/delete-preview', authenticate, requireAdmin, async (req
         summary: {
           total_records: totalRecords,
           has_active_subscription: user.subscription_status === 'active' || user.subscription_status === 'trialing',
-          has_payments: parseInt(counts.rows[0].payments) > 0,
-          has_claims: parseInt(counts.rows[0].claims) > 0
+          has_payments: Number(impact.payments || 0) > 0,
+          has_claims: Number(impact.claims || 0) > 0
         }
       }
     });
@@ -592,7 +599,7 @@ router.post('/clients/bulk-delete', authenticate, requireAdmin, async (req, res)
         'users',
         JSON.stringify(clientIds),
         JSON.stringify({ 
-          users: users.map(u => ({ id: u.id, name: u.name, email: u.email })),
+          users: users.map((u: any) => ({ id: u.id, name: u.name, email: u.email })),
           timestamp: new Date().toISOString()
         }),
         reason || 'Bulk deletion requested by admin'
