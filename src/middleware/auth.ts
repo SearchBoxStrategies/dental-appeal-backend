@@ -42,12 +42,29 @@ export const authenticate = async (req: Request, res: Response, next: NextFuncti
       email: user.email,
       isAdmin: user.is_admin === true,
       practiceId: user.practice_id,
-      role: user.role
+      role: user.role || (user.is_admin ? 'admin' : 'clinic')
     };
 
     next();
   } catch (error) {
-    console.error('Auth error:', error);
+    console.error('❌ Auth error:', error);
     return res.status(401).json({ error: 'Invalid token' });
+  }
+};
+
+export const requireAdmin = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    if (!req.user.isAdmin) {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    next();
+  } catch (error) {
+    console.error('❌ Admin auth error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
   }
 };
