@@ -1,10 +1,18 @@
 // src/utils/affiliateTiers.ts
 import { db } from '../db';
 
+// Program terms: tier is set by paid conversions in the current calendar month.
+//   Standard 20% (default) | Pro 25% (5+ conversions/month) | Partner 30% (10+ conversions/month)
+export const TIERS = [
+  { name: 'Partner', rate: 30, minMonthlyConversions: 10 },
+  { name: 'Pro', rate: 25, minMonthlyConversions: 5 },
+  { name: 'Standard', rate: 20, minMonthlyConversions: 0 },
+] as const;
+
 export interface AffiliateTier {
   rate: number;
   name: string;
-  referralCount: number;
+  referralCount: number; // paid conversions this calendar month
 }
 
 export interface AffiliateTierWithId extends AffiliateTier {
@@ -15,38 +23,42 @@ export interface NextTierInfo {
   nextTier: string | null;
   nextRate: number | null;
   conversionsNeeded: number | null;
+  monthlyConversions: number;
 }
 
 /**
- * Get tier based on conversion count (pure function)
+ * Get tier based on this month's conversion count (pure function)
  */
-export function getTierByConversionCount(conversionCount: number): { rate: number; name: string } {
-  if (conversionCount >= 50) {
-    return { rate: 25, name: 'Partner' };
-  }
-  if (conversionCount >= 10) {
-    return { rate: 20, name: 'Pro' };
-  }
-  return { rate: 15, name: 'Standard' };
+export function getTierByConversionCount(monthlyConversions: number): { rate: number; name: string } {
+  const tier = TIERS.find(t => monthlyConversions >= t.minMonthlyConversions)!;
+  return { rate: tier.rate, name: tier.name };
 }
 
 /**
- * Get affiliate tier based on number of successful conversions
- * Uses total_conversions from the affiliates table
+ * Number of referred practices that made their first payment this calendar month
  */
-export async function getAffiliateTier(affiliateId: number): Promise<AffiliateTier> {
-  const { rows: [affiliate] } = await db.query(
-    `SELECT total_conversions FROM affiliates WHERE id = $1`,
+export async function getMonthlyConversions(affiliateId: number): Promise<number> {
+  const { rows: [row] } = await db.query(
+    `SELECT COUNT(*)::int AS count
+     FROM affiliate_referrals
+     WHERE affiliate_id = $1
+       AND converted_at >= date_trunc('month', NOW())`,
     [affiliateId]
   );
-  
-  const referralCount = affiliate?.total_conversions || 0;
+  return row?.count || 0;
+}
+
+/**
+ * Get affiliate tier based on this month's paid conversions
+ */
+export async function getAffiliateTier(affiliateId: number): Promise<AffiliateTier> {
+  const referralCount = await getMonthlyConversions(affiliateId);
   const tier = getTierByConversionCount(referralCount);
-  
-  return { 
-    rate: tier.rate, 
-    name: tier.name, 
-    referralCount 
+
+  return {
+    rate: tier.rate,
+    name: tier.name,
+    referralCount
   };
 }
 
@@ -55,16 +67,16 @@ export async function getAffiliateTier(affiliateId: number): Promise<AffiliateTi
  */
 export async function getAffiliateTierByPractice(practiceId: number): Promise<AffiliateTierWithId | null> {
   const { rows: [practice] } = await db.query(
-    `SELECT referred_by_affiliate_id 
-     FROM practices 
+    `SELECT referred_by_affiliate_id
+     FROM practices
      WHERE id = $1 AND referred_by_affiliate_id IS NOT NULL`,
     [practiceId]
   );
-  
+
   if (!practice?.referred_by_affiliate_id) {
     return null;
   }
-  
+
   const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
   return {
     ...tier,
@@ -77,61 +89,43 @@ export async function getAffiliateTierByPractice(practiceId: number): Promise<Af
  */
 export async function updateAffiliateTierColumn(affiliateId: number): Promise<void> {
   const tier = await getAffiliateTier(affiliateId);
-  
+
   await db.query(
-    `UPDATE affiliates 
+    `UPDATE affiliates
      SET tier = $1, commission_rate = $2
      WHERE id = $3`,
     [tier.name.toLowerCase(), tier.rate, affiliateId]
   );
-  
-  console.log(`✅ Updated affiliate ${affiliateId} to ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} conversions`);
+
+  console.log(`✅ Updated affiliate ${affiliateId} to ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} conversions this month`);
 }
 
 /**
- * Get info about the next tier the affiliate can achieve
+ * Get info about the next tier the affiliate can reach this month
  */
 export async function getNextTierInfo(affiliateId: number): Promise<NextTierInfo> {
-  const { rows: [affiliate] } = await db.query(
-    `SELECT total_conversions FROM affiliates WHERE id = $1`,
-    [affiliateId]
-  );
-  
-  const conversionCount = affiliate?.total_conversions || 0;
-  
-  if (conversionCount < 10) {
-    return {
-      nextTier: 'Pro',
-      nextRate: 20,
-      conversionsNeeded: 10 - conversionCount,
-    };
-  } else if (conversionCount < 50) {
-    return {
-      nextTier: 'Partner',
-      nextRate: 25,
-      conversionsNeeded: 50 - conversionCount,
-    };
-  } else {
-    return {
-      nextTier: null,
-      nextRate: null,
-      conversionsNeeded: null,
-    };
-  }
+  const monthlyConversions = await getMonthlyConversions(affiliateId);
+  const next = [...TIERS].reverse().find(t => monthlyConversions < t.minMonthlyConversions);
+
+  return {
+    nextTier: next?.name ?? null,
+    nextRate: next?.rate ?? null,
+    conversionsNeeded: next ? next.minMonthlyConversions - monthlyConversions : null,
+    monthlyConversions,
+  };
 }
 
 /**
- * Fix all affiliates - recalculate and update their tiers based on actual conversions
- * Run this once after deploying to fix any incorrect tiers
+ * Fix all affiliates - recalculate and update their tiers based on this month's conversions
  */
 export async function fixAllAffiliateTiers(): Promise<void> {
   const { rows: affiliates } = await db.query(
     `SELECT id FROM affiliates`
   );
-  
+
   for (const affiliate of affiliates) {
     await updateAffiliateTierColumn(affiliate.id);
   }
-  
+
   console.log(`✅ Fixed tiers for ${affiliates.length} affiliates`);
 }

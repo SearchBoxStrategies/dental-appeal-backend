@@ -1,12 +1,13 @@
 import { Router } from 'express';
 import { db } from '../db';
 import { authenticate } from '../middleware/auth';
+import { requireActiveSubscription } from '../middleware/subscription';
 import { generateAppealLetter } from '../services/claude';
 
 const router = Router();
 
 // Generate appeal letter for a claim
-router.post('/generate/:claimId', authenticate, async (req, res) => {
+router.post('/generate/:claimId', authenticate, requireActiveSubscription, async (req, res) => {
   try {
     const { rows: [claim] } = await db.query(
       'SELECT * FROM claims WHERE id = $1 AND practice_id = $2',

@@ -8,14 +8,14 @@ import { sendVerificationEmail, sendPasswordResetEmail, sendTwoFactorCodeEmail }
 
 const router = Router();
 
-// Helper: Generate 6-digit verification code
+// Helper: Generate 6-digit verification code (cryptographically random)
 const generateVerificationCode = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
-// Helper: Generate 6-digit 2FA code
+// Helper: Generate 6-digit 2FA code (cryptographically random)
 const generateTwoFactorCode = (): string => {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 };
 
 const registerSchema = z.object({

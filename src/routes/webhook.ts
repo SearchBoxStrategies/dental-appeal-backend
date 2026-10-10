@@ -1,5 +1,6 @@
 import express, { Request, Response } from 'express';
 import Stripe from 'stripe';
+import { PoolClient } from 'pg';
 import { getAffiliateTier, getAffiliateTierByPractice, updateAffiliateTierColumn } from '../utils/affiliateTiers';
 
 const router = express.Router();
@@ -7,153 +8,236 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-02-24.acacia',
 });
 
+const roundCents = (n: number) => Math.round(n * 100) / 100;
+
+function currentPeriod() {
+  const periodStart = new Date();
+  periodStart.setDate(1);
+  const periodEnd = new Date();
+  periodEnd.setMonth(periodEnd.getMonth() + 1);
+  periodEnd.setDate(0);
+  return { periodStart, periodEnd };
+}
+
+// Inserts a pending commission keyed by Stripe invoice id. Returns false if this invoice
+// already produced one (Stripe can deliver the same event more than once).
+async function insertCommission(
+  client: PoolClient,
+  referralId: number,
+  affiliateId: number,
+  amount: number,
+  stripeInvoiceId: string | null,
+  period: { periodStart: Date; periodEnd: Date }
+): Promise<boolean> {
+  const { rowCount } = await client.query(
+    `INSERT INTO affiliate_commissions (referral_id, amount, period_start, period_end, status, stripe_invoice_id)
+     VALUES ($1, $2, $3, $4, 'pending', $5)
+     ON CONFLICT (stripe_invoice_id) WHERE stripe_invoice_id IS NOT NULL DO NOTHING`,
+    [referralId, amount, period.periodStart, period.periodEnd, stripeInvoiceId]
+  );
+  if (!rowCount) return false;
+
+  await client.query(
+    `UPDATE affiliates
+     SET total_earnings = total_earnings + $1,
+         pending_earnings = pending_earnings + $1
+     WHERE id = $2`,
+    [amount, affiliateId]
+  );
+  return true;
+}
+
 // Helper: Create affiliate commission on first payment
-async function createAffiliateCommission(practiceId: number, subscriptionId: string, amount: number) {
+async function createAffiliateCommission(practiceId: number, subscriptionId: string, amount: number, stripeInvoiceId: string | null) {
+  const { db } = await import('../db');
+  const client = await db.connect();
   try {
-    const { db } = await import('../db');
-    
-    const { rows: [practice] } = await db.query(
-      `SELECT referred_by_affiliate_id, referral_code_used, stripe_subscription_id 
+    const { rows: [practice] } = await client.query(
+      `SELECT referred_by_affiliate_id, referral_code_used, stripe_subscription_id
        FROM practices WHERE id = $1`,
       [practiceId]
     );
-    
+
     if (!practice?.referred_by_affiliate_id) {
       console.log(`Practice ${practiceId} was not referred by any affiliate - no commission created`);
       return;
     }
-    
-    const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
-    
-    console.log(`Affiliate ${practice.referred_by_affiliate_id} is in ${tier.name} tier (${tier.rate}%) with ${tier.referralCount} conversions`);
-    
-    const { rows: [referral] } = await db.query(
+
+    await client.query('BEGIN');
+
+    const { rows: [referral] } = await client.query(
       `SELECT id
        FROM affiliate_referrals
-       WHERE referral_code = $1 AND practice_id IS NULL`,
+       WHERE referral_code = $1 AND practice_id IS NULL
+       LIMIT 1
+       FOR UPDATE`,
       [practice.referral_code_used]
     );
-    
+
     if (!referral) {
+      await client.query('ROLLBACK');
       console.log(`No pending referral record found for code: ${practice.referral_code_used}`);
       return;
     }
-    
-    await db.query(
-      `UPDATE affiliate_referrals 
-       SET practice_id = $1, 
-           converted_at = NOW(), 
+
+    await client.query(
+      `UPDATE affiliate_referrals
+       SET practice_id = $1,
+           converted_at = NOW(),
            subscription_id = $2,
            first_payment_date = NOW()
        WHERE id = $3`,
       [practiceId, subscriptionId, referral.id]
     );
-    
-    const commissionAmount = (amount / 100) * (tier.rate / 100);
-    
-    const periodStart = new Date();
-    periodStart.setDate(1);
-    const periodEnd = new Date();
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
-    periodEnd.setDate(0);
-    
-    await db.query(
-      `INSERT INTO affiliate_commissions (referral_id, amount, period_start, period_end, status)
-       VALUES ($1, $2, $3, $4, 'pending')`,
-      [referral.id, commissionAmount, periodStart, periodEnd]
+    await client.query(
+      `UPDATE affiliates SET total_conversions = total_conversions + 1 WHERE id = $1`,
+      [practice.referred_by_affiliate_id]
     );
-    
-    await db.query(
-      `UPDATE affiliates 
-       SET total_conversions = total_conversions + 1,
-           total_earnings = total_earnings + $1,
-           pending_earnings = pending_earnings + $1
-       WHERE id = $2`,
-      [commissionAmount, practice.referred_by_affiliate_id]
+    await client.query('COMMIT');
+
+    // Tier is based on this month's conversions, including the one just recorded
+    const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
+    const commissionAmount = roundCents((amount / 100) * (tier.rate / 100));
+
+    await client.query('BEGIN');
+    const created = await insertCommission(
+      client, referral.id, practice.referred_by_affiliate_id, commissionAmount, stripeInvoiceId, currentPeriod()
     );
-    
+    await client.query('COMMIT');
+
     await updateAffiliateTierColumn(practice.referred_by_affiliate_id);
-    
-    console.log(`✅ Created affiliate commission: $${commissionAmount.toFixed(2)} (${tier.rate}% ${tier.name} tier) for referral ${referral.id} (Practice: ${practiceId})`);
-    
+
+    if (created) {
+      console.log(`✅ Created affiliate commission: $${commissionAmount.toFixed(2)} (${tier.rate}% ${tier.name} tier) for referral ${referral.id} (Practice: ${practiceId})`);
+    } else {
+      console.log(`Commission for invoice ${stripeInvoiceId} already exists - skipping`);
+    }
+
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('❌ Failed to create affiliate commission:', error);
+  } finally {
+    client.release();
   }
 }
 
 // Helper: Create recurring monthly commission
 async function createRecurringAffiliateCommission(practiceId: number, invoice: Stripe.Invoice) {
+  const { db } = await import('../db');
+  const client = await db.connect();
   try {
-    const { db } = await import('../db');
-    
+    if (!invoice.amount_paid) {
+      console.log(`Invoice ${invoice.id} paid $0 - no commission`);
+      return;
+    }
+
     const tierInfo = await getAffiliateTierByPractice(practiceId);
-    
+
     if (!tierInfo) {
       console.log(`Practice ${practiceId} has no affiliate referral - no recurring commission`);
       return;
     }
-    
-    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} total conversions`);
-    
-    const { rows: [existingCommission] } = await db.query(
-      `SELECT c.id 
-       FROM affiliate_commissions c
-       JOIN affiliate_referrals r ON c.referral_id = r.id
-       WHERE r.practice_id = $1 
-       AND date_trunc('month', c.period_start) = date_trunc('month', NOW())`,
-      [practiceId]
-    );
-    
-    if (existingCommission) {
-      console.log(`Commission already exists for practice ${practiceId} this month - skipping`);
-      return;
-    }
-    
-    const amount = invoice.amount_paid;
-    const commissionAmount = (amount / 100) * (tierInfo.rate / 100);
-    
-    const periodStart = new Date();
-    periodStart.setDate(1);
-    const periodEnd = new Date();
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
-    periodEnd.setDate(0);
-    
-    const { rows: [referral] } = await db.query(
-      `SELECT id FROM affiliate_referrals 
+
+    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} conversions this month`);
+
+    const { rows: [referral] } = await client.query(
+      `SELECT id FROM affiliate_referrals
        WHERE practice_id = $1`,
       [practiceId]
     );
-    
+
     if (!referral) {
       console.log(`No referral found for practice ${practiceId}`);
       return;
     }
-    
-    await db.query(
-      `UPDATE affiliate_referrals 
+
+    const commissionAmount = roundCents((invoice.amount_paid / 100) * (tierInfo.rate / 100));
+
+    await client.query('BEGIN');
+    await client.query(
+      `UPDATE affiliate_referrals
        SET last_payment_date = NOW()
        WHERE id = $1`,
       [referral.id]
     );
-    
-    await db.query(
-      `INSERT INTO affiliate_commissions (referral_id, amount, period_start, period_end, status)
-       VALUES ($1, $2, $3, $4, 'pending')`,
-      [referral.id, commissionAmount, periodStart, periodEnd]
+    const created = await insertCommission(
+      client, referral.id, tierInfo.affiliateId, commissionAmount, invoice.id, currentPeriod()
     );
-    
-    await db.query(
-      `UPDATE affiliates 
-       SET total_earnings = total_earnings + $1,
-           pending_earnings = pending_earnings + $1
-       WHERE id = $2`,
-      [commissionAmount, tierInfo.affiliateId]
-    );
-    
-    console.log(`✅ Created recurring commission: $${commissionAmount.toFixed(2)} (${tierInfo.rate}% ${tierInfo.name} tier) for practice ${practiceId}`);
-    
+    await client.query('COMMIT');
+
+    if (created) {
+      console.log(`✅ Created recurring commission: $${commissionAmount.toFixed(2)} (${tierInfo.rate}% ${tierInfo.name} tier) for practice ${practiceId}`);
+    } else {
+      console.log(`Commission for invoice ${invoice.id} already exists - skipping`);
+    }
+
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('❌ Failed to create recurring commission:', error);
+  } finally {
+    client.release();
+  }
+}
+
+// Helper: Claw back commission when a subscription payment is refunded.
+// Adds a negative pending commission that nets against the affiliate's next payout.
+async function reverseCommissionForRefund(charge: Stripe.Charge) {
+  const invoiceId = typeof charge.invoice === 'string' ? charge.invoice : charge.invoice?.id;
+  if (!invoiceId || !charge.amount) return;
+
+  const { db } = await import('../db');
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const { rows: [commission] } = await client.query(
+      `SELECT c.id, c.amount, c.referral_id, c.period_start, c.period_end, r.affiliate_id
+       FROM affiliate_commissions c
+       JOIN affiliate_referrals r ON c.referral_id = r.id
+       WHERE c.stripe_invoice_id = $1
+       FOR UPDATE OF c`,
+      [invoiceId]
+    );
+
+    if (!commission) {
+      await client.query('ROLLBACK');
+      console.log(`Refund on invoice ${invoiceId} has no affiliate commission - nothing to reverse`);
+      return;
+    }
+
+    // charge.amount_refunded is cumulative, so reverse only what hasn't been reversed yet
+    const target = roundCents(parseFloat(commission.amount) * (charge.amount_refunded / charge.amount));
+    const { rows: [prior] } = await client.query(
+      `SELECT COALESCE(-SUM(amount), 0) AS reversed
+       FROM affiliate_commissions
+       WHERE stripe_invoice_id LIKE $1`,
+      [`refund:${charge.id}:%`]
+    );
+    const delta = roundCents(target - parseFloat(prior.reversed));
+
+    if (delta <= 0) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    const created = await insertCommission(
+      client,
+      commission.referral_id,
+      commission.affiliate_id,
+      -delta,
+      `refund:${charge.id}:${charge.amount_refunded}`,
+      { periodStart: commission.period_start, periodEnd: commission.period_end }
+    );
+    await client.query('COMMIT');
+
+    if (created) {
+      console.log(`↩️ Reversed $${delta.toFixed(2)} commission for refunded invoice ${invoiceId} (affiliate ${commission.affiliate_id})`);
+    }
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('❌ Failed to reverse commission for refund:', error);
+  } finally {
+    client.release();
   }
 }
 
@@ -251,7 +335,8 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
         await createAffiliateCommission(
           parseInt(session.metadata?.practiceId),
           session.subscription as string,
-          amountTotal
+          amountTotal,
+          typeof session.invoice === 'string' ? session.invoice : session.invoice?.id ?? null
         );
         
       } catch (dbError) {
@@ -328,6 +413,13 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       break;
     }
     
+    case 'charge.refunded': {
+      const charge = event.data.object as Stripe.Charge;
+      console.log(`↩️ Charge refunded: ${charge.id} ($${(charge.amount_refunded / 100).toFixed(2)} of $${(charge.amount / 100).toFixed(2)})`);
+      await reverseCommissionForRefund(charge);
+      break;
+    }
+
     case 'account.updated': {
       const account = event.data.object as Stripe.Account;
       const affiliateId = account.metadata?.affiliateId;
@@ -339,6 +431,7 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
         await db.query(
           `UPDATE affiliates 
            SET stripe_account_status = $1,
+               auto_payout_enabled = CASE WHEN $2 AND stripe_onboarded_at IS NULL THEN true ELSE auto_payout_enabled END,
                stripe_onboarded_at = CASE WHEN $2 AND stripe_onboarded_at IS NULL THEN NOW() ELSE stripe_onboarded_at END
            WHERE id = $3`,
           [isActive ? 'verified' : 'pending', isActive, affiliateId]

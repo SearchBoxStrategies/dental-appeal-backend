@@ -4,12 +4,20 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: '2025-02-24.acacia',
 });
 
+export const SUPPORTED_AFFILIATE_COUNTRIES = ['US', 'CA'] as const;
+export type AffiliateCountry = typeof SUPPORTED_AFFILIATE_COUNTRIES[number];
+
+// Country of the platform's own Stripe account. Affiliates in another country are set up as
+// cross-border payout recipients, which Stripe requires for transfers across borders.
+const PLATFORM_COUNTRY = (process.env.STRIPE_PLATFORM_COUNTRY || 'US').toUpperCase();
+
 // Create a Stripe Connect account for an affiliate (Express account)
-export async function createConnectAccount(affiliateId: number, email: string, fullName: string) {
+export async function createConnectAccount(affiliateId: number, email: string, fullName: string, country: AffiliateCountry = 'US') {
   try {
     const account = await stripe.accounts.create({
       type: 'express',
-      country: 'US',
+      country,
+      ...(country !== PLATFORM_COUNTRY ? { tos_acceptance: { service_agreement: 'recipient' } } : {}),
       email: email,
       business_type: 'individual',
       individual: {
@@ -82,16 +90,32 @@ export async function getAccountStatus(accountId: string) {
   }
 }
 
-// Transfer funds to a Connect account
-export async function transferToAffiliate(affiliateStripeAccountId: string, amount: number, currency: string = 'usd', description: string) {
+// Transfer funds to a Connect account.
+// With a payoutKey, the transfer is tagged with it and reused if one already exists, so a
+// retried payout is never sent twice (Stripe's own idempotency keys expire after 24h).
+export async function transferToAffiliate(
+  affiliateStripeAccountId: string,
+  amount: number,
+  currency: string = 'usd',
+  description: string,
+  payoutKey?: string
+) {
   try {
-    const transfer = await stripe.transfers.create({
-      amount: Math.round(amount * 100), // Convert to cents
-      currency,
-      destination: affiliateStripeAccountId,
-      transfer_group: `commission_payout_${Date.now()}`,
-      description,
-    });
+    if (payoutKey) {
+      const existing = await stripe.transfers.list({ transfer_group: payoutKey, limit: 1 });
+      if (existing.data[0]) return existing.data[0];
+    }
+
+    const transfer = await stripe.transfers.create(
+      {
+        amount: Math.round(amount * 100), // Convert to cents
+        currency,
+        destination: affiliateStripeAccountId,
+        transfer_group: payoutKey || `commission_payout_${Date.now()}`,
+        description,
+      },
+      payoutKey ? { idempotencyKey: payoutKey } : undefined
+    );
 
     return transfer;
   } catch (error) {

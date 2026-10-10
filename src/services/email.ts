@@ -21,6 +21,15 @@ export interface EmailOptions {
   text?: string;
 }
 
+// Escape user-supplied text before placing it in email HTML.
+const escapeHtml = (value: unknown): string =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 export const sendEmail = async (options: EmailOptions) => {
   console.log(`📧 sendEmail called for ${options.to}`);
   console.log(`📧 SMTP_PASS: ${process.env.SMTP_PASS ? 'SET' : 'NOT SET'}`);
@@ -55,7 +64,6 @@ export const sendEmail = async (options: EmailOptions) => {
 // ============================================
 export const sendVerificationEmail = async (email: string, token: string, practiceName: string) => {
   console.log(`📧 SENDING VERIFICATION EMAIL to ${email}`);
-  console.log(`📧 TOKEN: ${token}`);
   
   // FIX: Use FRONTEND_URL instead of BACKEND_URL
   const verificationUrl = `${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/verify-email?token=${token}`;
@@ -176,7 +184,7 @@ export const sendVerificationEmail = async (email: string, token: string, practi
             </div>
           </div>
           <div class="content">
-            <div class="greeting">Welcome, ${practiceName}!</div>
+            <div class="greeting">Welcome, ${escapeHtml(practiceName)}!</div>
             <p class="message">
               Thank you for registering with DentalAppeal. Please verify your email address to activate your account and start managing your insurance appeals.
             </p>
@@ -236,7 +244,7 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
         <div class="header">
           <h2>Password Reset Request</h2>
         </div>
-        <p>Hello ${name},</p>
+        <p>Hello ${escapeHtml(name)},</p>
         <p>We received a request to reset your password. Click the button below to create a new password.</p>
         <div style="text-align: center;">
           <a href="${resetUrl}" class="button">Reset Password</a>
@@ -278,7 +286,7 @@ export const sendTwoFactorCodeEmail = async (email: string, code: string, name: 
     <body>
       <div class="container">
         <h2>Two-Factor Authentication</h2>
-        <p>Hello ${name},</p>
+        <p>Hello ${escapeHtml(name)},</p>
         <p>Enter the following code to complete your login:</p>
         <div class="code">${code}</div>
         <p>This code expires in 10 minutes.</p>
@@ -318,10 +326,10 @@ export const sendAppealStatusUpdate = async (email: string, patientName: string,
       </div>
       <div style="padding: 20px; border: 1px solid #e2e8f0; border-top: none;">
         <h2>Appeal Status Updated</h2>
-        <p>The appeal for <strong>${patientName}</strong> has changed status.</p>
+        <p>The appeal for <strong>${escapeHtml(patientName)}</strong> has changed status.</p>
         <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0;">
-          <p><strong>Previous Status:</strong> ${statusLabels[oldStatus] || oldStatus}</p>
-          <p><strong>New Status:</strong> ${statusLabels[newStatus] || newStatus}</p>
+          <p><strong>Previous Status:</strong> ${escapeHtml(statusLabels[oldStatus] || oldStatus)}</p>
+          <p><strong>New Status:</strong> ${escapeHtml(statusLabels[newStatus] || newStatus)}</p>
         </div>
         <a href="${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/claims/${claimId}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">View Your Appeal</a>
       </div>
@@ -378,7 +386,7 @@ export const sendWeeklyDigest = async (email: string, name: string, stats: {
         <h1 style="color: white; margin: 0;">Weekly Digest</h1>
       </div>
       <div style="padding: 20px; border: 1px solid #e2e8f0; border-top: none;">
-        <p>Hello ${name},</p>
+        <p>Hello ${escapeHtml(name)},</p>
         <p>Here's your appeal performance summary for the past week:</p>
         <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin: 20px 0;">
           <div style="background: #f8fafc; padding: 15px; border-radius: 8px; text-align: center;">
@@ -415,7 +423,6 @@ export const sendWeeklyDigest = async (email: string, name: string, stats: {
 // ============================================
 export const sendAffiliateVerificationEmail = async (email: string, name: string, verificationLink: string) => {
   console.log(`📧 sendAffiliateVerificationEmail called for ${email}`);
-  console.log(`📧 Verification link: ${verificationLink}`);
   
   const subject = 'Verify Your Affiliate Account - DentalAppeal';
   const html = `
@@ -451,7 +458,7 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
             </div>
           </div>
           <div class="content">
-            <div class="greeting">Welcome to the DentalAppeal Affiliate Program, ${name}!</div>
+            <div class="greeting">Welcome to the DentalAppeal Affiliate Program, ${escapeHtml(name)}!</div>
             <p class="message">
               Thank you for signing up as an affiliate. Please verify your email address to continue.
             </p>

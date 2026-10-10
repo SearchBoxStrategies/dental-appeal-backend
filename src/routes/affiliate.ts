@@ -3,7 +3,7 @@ import { db } from '../db';
 import { authenticate } from '../middleware/auth';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus } from '../services/stripeConnect';
+import { createConnectAccount, createAccountOnboardingLink, createAccountLoginLink, getAccountStatus, SUPPORTED_AFFILIATE_COUNTRIES, AffiliateCountry } from '../services/stripeConnect';
 import { sendEmail, sendAffiliateVerificationEmail } from '../services/email';
 import { getNextTierInfo, updateAffiliateTierColumn } from '../utils/affiliateTiers';
 
@@ -537,9 +537,13 @@ router.post('/connect/setup', authenticate, async (req: Request, res) => {
     }
     
     let stripeAccountId = affiliate.stripe_account_id;
-    
+
     if (!stripeAccountId) {
-      const account = await createConnectAccount(affiliate.id, affiliate.email, affiliate.full_name);
+      const country = String(req.body?.country || 'US').toUpperCase();
+      if (!(SUPPORTED_AFFILIATE_COUNTRIES as readonly string[]).includes(country)) {
+        return res.status(400).json({ error: 'Payouts are available to affiliates in the US and Canada' });
+      }
+      const account = await createConnectAccount(affiliate.id, affiliate.email, affiliate.full_name, country as AffiliateCountry);
       stripeAccountId = account.id;
       
       await db.query(
@@ -581,13 +585,36 @@ router.get('/connect/status', authenticate, async (req: Request, res) => {
     }
     
     const status = await getAccountStatus(affiliate.stripe_account_id);
-    
+
+    // Sync from Stripe directly: account.updated events for connected accounts arrive on a
+    // separate Connect webhook, so don't rely on them alone. Monthly payouts are switched on
+    // automatically the first time an account becomes payable.
+    let accountStatus = affiliate.stripe_account_status;
+    let autoPayout = affiliate.auto_payout_enabled;
+    if (status) {
+      const isActive = !!(status.payouts_enabled && status.details_submitted);
+      const newStatus = isActive ? 'verified' : 'pending';
+      if (newStatus !== accountStatus) {
+        const { rows: [updated] } = await db.query(
+          `UPDATE affiliates
+           SET stripe_account_status = $1,
+               auto_payout_enabled = CASE WHEN $2 AND stripe_onboarded_at IS NULL THEN true ELSE auto_payout_enabled END,
+               stripe_onboarded_at = CASE WHEN $2 AND stripe_onboarded_at IS NULL THEN NOW() ELSE stripe_onboarded_at END
+           WHERE user_id = $3
+           RETURNING stripe_account_status, auto_payout_enabled`,
+          [newStatus, isActive, userId]
+        );
+        accountStatus = updated.stripe_account_status;
+        autoPayout = updated.auto_payout_enabled;
+      }
+    }
+
     res.json({
       hasAccount: true,
-      status: affiliate.stripe_account_status,
+      status: accountStatus,
       details_submitted: status?.details_submitted,
       payouts_enabled: status?.payouts_enabled,
-      auto_payout_enabled: affiliate.auto_payout_enabled,
+      auto_payout_enabled: autoPayout,
     });
   } catch (error) {
     console.error('Connect status error:', error);
@@ -838,15 +865,15 @@ router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
     const ids = pendingCommissions.rows.map(c => c.id);
 
     await db.query(
-      `UPDATE affiliate_commissions 
+      `UPDATE affiliate_commissions
        SET status = 'paid', paid_at = NOW()
-       WHERE id = ANY($1::int[])`,
+       WHERE id = ANY($1::int[]) AND status = 'pending'`,
       [ids]
     );
 
     await db.query(
-      `UPDATE affiliates 
-       SET pending_earnings = 0,
+      `UPDATE affiliates
+       SET pending_earnings = pending_earnings - $1,
            paid_earnings = paid_earnings + $1
        WHERE id = $2`,
       [totalAmount, id]
