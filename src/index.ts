@@ -22,10 +22,18 @@ import insuranceRouter from './routes/insurance';
 import affiliateRouter from './routes/affiliate';
 import adminEmailTemplatesRouter from './routes/adminEmailTemplates';
 import calculatorRouter from './routes/calculator';
+import {
+  apiLimiter, authLimiter, loginPerAccountLimiter, twoFactorLimiter,
+  emailFormLimiter, emailRecipientLimiter, trackLimiter,
+} from './middleware/rateLimit';
 
 const app = express();
 console.log('✅ Backend starting up...');
 const PORT = process.env.PORT ?? 3001;
+
+// Hostinger serves the API through one reverse proxy; trust it so req.ip is the real client
+// IP (rate limits would otherwise treat every visitor as the same address).
+app.set('trust proxy', 1);
 
 // Explicit CORS configuration for browser compatibility
 app.use(cors({ 
@@ -39,6 +47,21 @@ app.use(cors({
 app.use('/api/webhook', webhookRouter);
 
 app.use(express.json());
+
+// Rate limits (the Stripe webhook above is excluded)
+app.use('/api', apiLimiter);
+app.post(
+  [
+    '/api/auth/login', '/api/auth/register', '/api/auth/forgot-password', '/api/auth/reset-password/:token',
+    '/api/auth/resend-verification', '/api/auth/verify-2fa', '/api/auth/resend-2fa',
+    '/api/affiliate/signup', '/api/affiliate/set-password', '/api/affiliate/resend-verification',
+  ],
+  authLimiter
+);
+app.post('/api/auth/login', loginPerAccountLimiter);
+app.post(['/api/auth/verify-2fa', '/api/auth/resend-2fa'], twoFactorLimiter);
+app.post('/api/calculator/send-report', emailFormLimiter, emailRecipientLimiter);
+app.get('/api/affiliate/track/:code', trackLimiter);
 
 // Register all API routes
 app.use('/api/auth', authRouter);
