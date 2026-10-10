@@ -27,6 +27,7 @@ router.get('/clients', authenticate, requireAdmin, async (req, res) => {
       FROM users u
       LEFT JOIN practices p ON u.practice_id = p.id
       WHERE u.is_admin = FALSE AND u.deleted_at IS NULL
+        AND COALESCE(u.user_type, 'clinic') <> 'affiliate'  -- affiliates have their own admin page
       ORDER BY u.created_at DESC
     `);
 
@@ -53,6 +54,7 @@ router.get('/clients/deleted', authenticate, requireAdmin, async (req, res) => {
       FROM users u
       LEFT JOIN practices p ON u.practice_id = p.id
       WHERE u.is_admin = FALSE AND u.deleted_at IS NOT NULL
+        AND COALESCE(u.user_type, 'clinic') <> 'affiliate'
       ORDER BY u.deleted_at DESC
     `);
     
@@ -724,6 +726,7 @@ router.get('/subscriptions', authenticate, requireAdmin, async (req, res) => {
       FROM users u
       LEFT JOIN practices p ON u.practice_id = p.id
       WHERE u.is_admin = FALSE AND u.deleted_at IS NULL
+        AND COALESCE(u.user_type, 'clinic') <> 'affiliate'  -- affiliates have their own admin page
       ORDER BY u.created_at DESC
     `);
 
