@@ -176,11 +176,13 @@ export async function processAutoPayouts() {
         console.error(`❌ Failed to payout affiliate ${affiliate.id} (${affiliate.email}):`, errorMessage);
         failureCount++;
 
-        // Only release if Stripe definitely rejected the transfer. On network errors the
-        // transfer may have gone through, so the batch stays 'processing' and step 1 of the
-        // next run retries it with the same payout key.
-        const stripeRejected = (error as any)?.type === 'StripeInvalidRequestError' || (error as any)?.type === 'StripeCardError';
-        if (stripeRejected) await releaseCommissions(batch.ids);
+        // Release the batch when Stripe definitely did not create a transfer (it answered with a
+        // rejection: bad request, auth, permission, rate limit, card). On network or Stripe-side
+        // server errors the transfer may have gone through, so the batch stays 'processing' and
+        // step 1 of the next run resolves it with the same payout key.
+        const type = (error as any)?.type;
+        const maybeSent = !type || type === 'StripeConnectionError' || type === 'StripeAPIError';
+        if (!maybeSent) await releaseCommissions(batch.ids);
 
         await db.query(
           `INSERT INTO payout_logs (affiliate_id, amount, status, error_message, processed_at)

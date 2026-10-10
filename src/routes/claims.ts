@@ -61,7 +61,7 @@ router.get('/:id', authenticate, async (req, res) => {
     }
 
     const { rows: appeals } = await db.query(
-      'SELECT id, status, model_used, created_at FROM appeals WHERE claim_id = $1 ORDER BY created_at DESC',
+      'SELECT id, status, model_used, created_at, letter_content FROM appeals WHERE claim_id = $1 ORDER BY created_at DESC',
       [claim.id]
     );
 
@@ -92,23 +92,26 @@ router.patch('/:id/status', authenticate, async (req, res) => {
     const { status, amountRecovered } = parsed.data;
     const practiceId = req.user!.practiceId;
     const recovers = status === 'won' || status === 'paid';
+    const resolves = RESOLVED_STATUSES.includes(status);
 
+    // Each parameter is used once with an explicit type: Postgres rejects a parameter that it
+    // infers as both text and varchar.
     const { rows: [claim] } = await db.query(
       `UPDATE claims
        SET status = $1,
            amount_recovered = CASE
-             WHEN NOT $4 THEN NULL
+             WHEN NOT $4::boolean THEN NULL
              WHEN $5::numeric IS NOT NULL THEN $5::numeric
              ELSE amount_recovered
            END,
            resolved_at = CASE
-             WHEN $1 = ANY($6::text[]) THEN COALESCE(resolved_at, NOW())
+             WHEN $6::boolean THEN COALESCE(resolved_at, NOW())
              ELSE NULL
            END,
            updated_at = NOW()
        WHERE id = $2 AND practice_id = $3
        RETURNING *`,
-      [status, claimId, practiceId, recovers, amountRecovered ?? null, RESOLVED_STATUSES]
+      [status, claimId, practiceId, recovers, amountRecovered ?? null, resolves]
     );
     
     if (!claim) {

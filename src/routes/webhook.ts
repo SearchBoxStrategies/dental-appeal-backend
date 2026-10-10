@@ -314,10 +314,12 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
              SET referral_code_used = $1,
                  referred_by_affiliate_id = (
                    SELECT affiliate_id FROM affiliate_referrals 
-                   WHERE referral_code = $1 LIMIT 1
+                   WHERE referral_code = $3 LIMIT 1
                  )
              WHERE id = $2`,
-            [referralCode, practiceId]
+            // Same value passed twice: reusing $1 for both the column and the comparison makes
+            // Postgres reject the query, which aborted this whole webhook (practice never activated).
+            [referralCode, practiceId, referralCode]
           );
           console.log(`✅ Updated practice ${practiceId} with referral code ${referralCode}`);
         }

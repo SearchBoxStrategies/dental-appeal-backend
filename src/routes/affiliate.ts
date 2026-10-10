@@ -184,19 +184,21 @@ router.get('/verify', async (req, res) => {
       return res.redirect(`${process.env.FRONTEND_URL}/affiliate/verify?error=expired`);
     }
     
-    // Mark email as verified
+    // Mark email as verified and issue a one-time setup token (valid 1 hour) that the
+    // set-password step must present, so knowing the email alone can't claim the account.
+    const setupToken = crypto.randomBytes(32).toString('hex');
     await db.query(
-      `UPDATE users 
-       SET email_verified = true, 
-           email_verified_at = NOW(), 
-           verification_token = NULL,
-           verification_token_expires = NULL
+      `UPDATE users
+       SET email_verified = true,
+           email_verified_at = NOW(),
+           verification_token = $2,
+           verification_token_expires = NOW() + INTERVAL '1 hour'
        WHERE id = $1`,
-      [user.id]
+      [user.id, setupToken]
     );
-    
+
     // Redirect to set password page
-    res.redirect(`${process.env.FRONTEND_URL}/affiliate/set-password?email=${encodeURIComponent(user.email)}&verified=true`);
+    res.redirect(`${process.env.FRONTEND_URL}/affiliate/set-password?email=${encodeURIComponent(user.email)}&verified=true&token=${setupToken}`);
   } catch (error) {
     console.error('Affiliate verification error:', error);
     res.status(500).json({ error: 'Verification failed' });
@@ -206,24 +208,33 @@ router.get('/verify', async (req, res) => {
 // Set password for verified affiliate
 router.post('/set-password', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    
+    const { email, password, token } = req.body;
+
     if (!email || !password || password.length < 6) {
       return res.status(400).json({ error: 'Email and password (min 6 characters) are required' });
     }
-    
+    if (!token || typeof token !== 'string') {
+      return res.status(400).json({ error: 'This link is missing its setup code. Please use the link from your verification email.' });
+    }
+
     const passwordHash = await bcrypt.hash(password, 10);
-    
+
     const result = await db.query(
-      `UPDATE users 
-       SET password_hash = $1
-       WHERE email = $2 AND email_verified = true AND (password_hash IS NULL OR password_hash = '')
+      `UPDATE users
+       SET password_hash = $1,
+           verification_token = NULL,
+           verification_token_expires = NULL
+       WHERE email = $2
+         AND verification_token = $3
+         AND verification_token_expires > NOW()
+         AND email_verified = true
+         AND (password_hash IS NULL OR password_hash = '')
        RETURNING id, email`,
-      [passwordHash, email]
+      [passwordHash, email, token]
     );
-    
+
     if (result.rows.length === 0) {
-      return res.status(400).json({ error: 'User not found, email not verified, or password already set' });
+      return res.status(400).json({ error: 'This setup link is invalid or expired, or the password is already set. Request a new verification email.' });
     }
     
     res.json({ success: true, message: 'Password set successfully. You can now log in.' });
@@ -239,27 +250,29 @@ router.post('/resend-verification', async (req, res) => {
     const { email } = req.body;
     
     const { rows: [user] } = await db.query(
-      `SELECT id, email, name, email_verified, user_type
-       FROM users 
+      `SELECT id, email, name, email_verified, user_type,
+              (password_hash IS NULL OR password_hash = '') AS needs_password
+       FROM users
        WHERE email = $1 AND user_type = 'affiliate'`,
       [email]
     );
-    
+
     if (!user) {
       return res.status(404).json({ error: 'Affiliate not found' });
     }
-    
-    if (user.email_verified) {
+
+    // Verified affiliates who never set a password (setup link expired) can get a fresh link.
+    if (user.email_verified && !user.needs_password) {
       return res.status(400).json({ error: 'Email already verified' });
     }
-    
+
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const tokenExpiry = new Date();
     tokenExpiry.setHours(tokenExpiry.getHours() + 24);
-    
+
     await db.query(
-      `UPDATE users 
-       SET verification_token = $1, verification_token_expires = $2
+      `UPDATE users
+       SET verification_token = $1, verification_token_expires = $2, email_verified = false
        WHERE id = $3`,
       [verificationToken, tokenExpiry, user.id]
     );

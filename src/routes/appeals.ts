@@ -71,9 +71,9 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, async
 
     // Save the generated letter to database
     const { rows: [appeal] } = await db.query(
-      `INSERT INTO appeals (claim_id, letter_content, model_used)
-       VALUES ($1, $2, $3) RETURNING *`,
-      [claim.id, letter, model]
+      `INSERT INTO appeals (claim_id, practice_id, created_by, prompt_used, letter_content, model_used)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [claim.id, req.user!.practiceId, req.user!.userId, promptUsed, letter, model]
     );
 
     res.status(201).json(appeal);
@@ -91,7 +91,7 @@ router.get('/:id', authenticate, async (req, res) => {
               c.procedure_codes, c.denial_reason, c.service_date, c.amount_denied
        FROM appeals a
        JOIN claims c ON a.claim_id = c.id
-       WHERE a.id = $1 AND a.practice_id = $2`,
+       WHERE a.id = $1 AND c.practice_id = $2`,
       [req.params.id, req.user!.practiceId]
     );
 

@@ -325,6 +325,7 @@ router.post('/login', async (req, res) => {
         role: user.role || 'clinic',
         email_verified: user.email_verified,
         is_admin: user.is_admin || false,
+        user_type: user.user_type || (user.is_admin ? 'admin' : 'clinic'),
         two_factor_enabled: user.two_factor_enabled || false
       },
       practice: user.practice_id ? {
@@ -536,6 +537,10 @@ router.get('/me', async (req, res) => {
       } : null,
     });
   } catch (error) {
+    // A bad, tampered or expired token means "not signed in", so the app can clear it.
+    if (error instanceof jwt.JsonWebTokenError) {
+      return res.status(401).json({ error: 'Invalid or expired session' });
+    }
     console.error('❌ Get me error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
