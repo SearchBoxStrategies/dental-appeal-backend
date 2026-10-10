@@ -31,13 +31,15 @@ router.get('/stats', authenticate, async (req, res) => {
 
 router.get('/', authenticate, async (req, res) => {
   try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit as string) || 0, 0), 500);
     const { rows } = await db.query(
       `SELECT c.*, u.name AS created_by_name
        FROM claims c
        JOIN users u ON c.created_by = u.id
        WHERE c.practice_id = $1
-       ORDER BY c.created_at DESC`,
-      [req.user!.practiceId]
+       ORDER BY c.created_at DESC
+       ${limit ? 'LIMIT $2' : ''}`,
+      limit ? [req.user!.practiceId, limit] : [req.user!.practiceId]
     );
     res.json(rows);
   } catch (error) {
@@ -70,16 +72,43 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
+const CLAIM_STATUSES = ['pending', 'draft', 'appealed', 'under_review', 'won', 'lost', 'paid'] as const;
+const RESOLVED_STATUSES = ['won', 'lost', 'paid'];
+
+const statusSchema = z.object({
+  status: z.enum(CLAIM_STATUSES),
+  // What the insurer paid after the appeal; only meaningful for won/paid.
+  amountRecovered: z.number().nonnegative().max(1_000_000).nullable().optional(),
+});
+
 // Update claim status endpoint
 router.patch('/:id/status', authenticate, async (req, res) => {
   try {
     const claimId = req.params.id;
-    const { status } = req.body;
+    const parsed = statusSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: 'Invalid status or recovered amount' });
+    }
+    const { status, amountRecovered } = parsed.data;
     const practiceId = req.user!.practiceId;
-    
+    const recovers = status === 'won' || status === 'paid';
+
     const { rows: [claim] } = await db.query(
-      'UPDATE claims SET status = $1 WHERE id = $2 AND practice_id = $3 RETURNING *',
-      [status, claimId, practiceId]
+      `UPDATE claims
+       SET status = $1,
+           amount_recovered = CASE
+             WHEN NOT $4 THEN NULL
+             WHEN $5::numeric IS NOT NULL THEN $5::numeric
+             ELSE amount_recovered
+           END,
+           resolved_at = CASE
+             WHEN $1 = ANY($6::text[]) THEN COALESCE(resolved_at, NOW())
+             ELSE NULL
+           END,
+           updated_at = NOW()
+       WHERE id = $2 AND practice_id = $3
+       RETURNING *`,
+      [status, claimId, practiceId, recovers, amountRecovered ?? null, RESOLVED_STATUSES]
     );
     
     if (!claim) {
