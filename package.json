@@ -19,8 +19,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
-    "multer": "^1.4.5-lts.1",
-    "nodemailer": "^6.10.0",
+    "multer": "^2.4.0",
+    "nodemailer": "^10.1.1",
     "pg": "^8.13.3",
     "stripe": "^17.0.0",
     "typescript": "^5.3.3",
@@ -37,5 +37,8 @@
     "@types/pg": "^8.11.11",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0"
+  },
+  "overrides": {
+    "qs": "^6.16.0"
   }
 }
