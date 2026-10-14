@@ -1,13 +1,16 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { db } from '../db';
 import { authenticate } from '../middleware/auth';
 import { requireActiveSubscription } from '../middleware/subscription';
-import { generateAppealLetter } from '../services/claude';
+import { aiLimiter } from '../middleware/rateLimit';
+import { generateAppealLetter, ClaudeError } from '../services/claude';
+import { buildChecklist } from '../services/checklist';
 
 const router = Router();
 
 // Generate appeal letter for a claim
-router.post('/generate/:claimId', authenticate, requireActiveSubscription, async (req, res) => {
+router.post('/generate/:claimId', authenticate, requireActiveSubscription, aiLimiter, async (req, res) => {
   try {
     const { rows: [claim] } = await db.query(
       'SELECT * FROM claims WHERE id = $1 AND practice_id = $2',
@@ -35,6 +38,17 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, async
       [claim.insurance_company_id]
     );
 
+    // Enclosures: the checklist items the clinic ticked off, plus files attached to the claim.
+    const checklistState = claim.checklist_state || {};
+    const enclosures = buildChecklist(claim.procedure_codes, claim.denial_reason)
+      .filter((item) => checklistState[item.id])
+      .map((item) => item.label);
+    const { rows: documents } = await db.query(
+      'SELECT file_name FROM claim_documents WHERE claim_id = $1 ORDER BY uploaded_at',
+      [claim.id]
+    ).catch(() => ({ rows: [] as { file_name: string }[] }));
+    for (const doc of documents) enclosures.push(`Attached file: ${doc.file_name}`);
+
     // Generate appeal letter with claim data, practice profile, and insurance info
     const { letter, model, promptUsed } = await generateAppealLetter(
       {
@@ -50,6 +64,11 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, async
         amountClaimed: claim.amount_claimed ? parseFloat(claim.amount_claimed) : null,
         amountDenied: claim.amount_denied ? parseFloat(claim.amount_denied) : null,
         practiceName: practice?.name || 'Dental Practice',
+        denialDate: claim.denial_date ? new Date(claim.denial_date).toISOString().slice(0, 10) : null,
+        // Only a note the dentist approved goes into the letter.
+        dentistNote: claim.dentist_note_approved_at ? claim.dentist_note : null,
+        dentistNoteApprovedBy: claim.dentist_note_approved_by,
+        enclosures,
       },
       {
         name: practice?.name || 'Dental Practice',
@@ -78,6 +97,7 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, async
 
     res.status(201).json(appeal);
   } catch (error) {
+    if (error instanceof ClaudeError) return res.status(422).json({ error: error.message });
     console.error('Generate appeal error:', error);
     res.status(500).json({ error: 'Failed to generate appeal letter' });
   }
@@ -100,6 +120,30 @@ router.get('/:id', authenticate, async (req, res) => {
       return;
     }
 
+    res.json(appeal);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+const letterEditSchema = z.object({
+  letterContent: z.string().trim().min(20).max(50000),
+});
+
+// Save the clinic's edits to a letter.
+router.patch('/:id', authenticate, async (req, res) => {
+  try {
+    const parsed = letterEditSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Letter text is required' });
+    const { rows: [appeal] } = await db.query(
+      `UPDATE appeals a SET letter_content = $1, edited_at = NOW()
+       FROM claims c
+       WHERE a.id = $2 AND a.claim_id = c.id AND c.practice_id = $3
+       RETURNING a.id, a.claim_id, a.status, a.model_used, a.created_at, a.edited_at, a.letter_content`,
+      [parsed.data.letterContent, req.params.id, req.user!.practiceId]
+    );
+    if (!appeal) return res.status(404).json({ error: 'Appeal not found' });
     res.json(appeal);
   } catch (error) {
     console.error(error);

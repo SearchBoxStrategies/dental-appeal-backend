@@ -1233,4 +1233,18 @@ router.post('/cron/payout', async (req, res) => {
   }
 });
 
+// Same secret as the payout cron. The API also runs this itself every 6 hours.
+router.post('/cron/reminders', async (req, res) => {
+  const expectedSecret = process.env.CRON_SECRET_KEY;
+  if (!expectedSecret) return res.status(500).json({ error: 'Cron secret not configured' });
+  if (req.headers['x-cron-secret'] !== expectedSecret) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { processAppealReminders } = await import('../jobs/appealReminders');
+    res.json({ success: true, ...(await processAppealReminders()) });
+  } catch (error) {
+    console.error('Cron reminders error:', error);
+    res.status(500).json({ error: 'Reminders failed' });
+  }
+});
+
 export default router;

@@ -85,3 +85,13 @@ export const trackLimiter = rateLimit({ name: 'track', windowMs: 60_000, max: 30
 
 // Overall ceiling per IP for the whole API.
 export const apiLimiter = rateLimit({ name: 'api', windowMs: 60_000, max: 300 });
+
+// AI calls (reading denial notices, drafting notes, writing letters): per signed-in user.
+// Runs after authenticate, so req.user is set.
+export const aiLimiter = rateLimit({
+  name: 'ai',
+  windowMs: 60 * 60_000,
+  max: 60,
+  key: req => (req.user ? `user:${req.user.userId}` : req.ip),
+  message: 'Too many AI requests this hour. Please wait a few minutes and try again.',
+});

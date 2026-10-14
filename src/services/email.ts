@@ -497,3 +497,74 @@ export const sendAffiliateVerificationEmail = async (email: string, name: string
   console.log(`📧 sendAffiliateVerificationEmail result for ${email}: ${result ? 'SUCCESS' : 'FAILED'}`);
   return result;
 };
+
+// ============================================
+// APPEAL DEADLINE AND FOLLOW-UP REMINDERS
+// ============================================
+// Claims are listed by claim number, insurer and amount only: no patient names in email.
+export interface ReminderClaim {
+  id: number;
+  insurance_company: string;
+  amount_denied: string | null;
+  appeal_deadline?: string | null;
+  days_left?: number | null;
+  days_since_appeal?: number | null;
+}
+
+export const sendAppealReminderEmail = async (
+  email: string,
+  name: string,
+  deadlines: ReminderClaim[],
+  followUps: ReminderClaim[]
+) => {
+  const appUrl = process.env.FRONTEND_URL || 'https://app.dentalappeal.claims';
+  const amount = (c: ReminderClaim) =>
+    c.amount_denied ? `$${Number(c.amount_denied).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '';
+  const row = (c: ReminderClaim, note: string) => `
+    <tr>
+      <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;"><a href="${appUrl}/claims/${c.id}" style="color: #2563eb;">Claim #${c.id}</a></td>
+      <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${escapeHtml(c.insurance_company)}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e2e8f0; text-align: right;">${amount(c)}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #e2e8f0;">${note}</td>
+    </tr>`;
+  const deadlineNote = (c: ReminderClaim) =>
+    (c.days_left ?? 0) < 0 ? `<strong style="color:#dc2626;">Deadline passed ${escapeHtml(c.appeal_deadline)}</strong>`
+      : c.days_left === 0 ? '<strong style="color:#dc2626;">Due today</strong>'
+      : `Due ${escapeHtml(c.appeal_deadline)} (${c.days_left} day${c.days_left === 1 ? '' : 's'})`;
+  const table = (rows: string) => `
+    <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin: 8px 0 20px;">${rows}</table>`;
+
+  const parts: string[] = [];
+  if (deadlines.length) {
+    parts.push(`<h3 style="margin-bottom: 4px;">Appeals due soon</h3>
+      <p style="margin-top: 0; color: #475569;">These denials have not been appealed yet.</p>
+      ${table(deadlines.map((c) => row(c, deadlineNote(c))).join(''))}`);
+  }
+  if (followUps.length) {
+    parts.push(`<h3 style="margin-bottom: 4px;">Time to follow up</h3>
+      <p style="margin-top: 0; color: #475569;">These appeals were sent 30+ days ago with no answer recorded. Call the insurer for a status update, then update the claim.</p>
+      ${table(followUps.map((c) => row(c, `Sent ${c.days_since_appeal} days ago`)).join(''))}`);
+  }
+
+  const total = deadlines.length + followUps.length;
+  const subject = deadlines.length
+    ? `${deadlines.length} appeal deadline${deadlines.length === 1 ? '' : 's'} coming up`
+    : `${followUps.length} appeal${followUps.length === 1 ? '' : 's'} to follow up`;
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+      <div style="background-color: #2563eb; padding: 20px; text-align: center;">
+        <h1 style="color: white; margin: 0;">DentalAppeal</h1>
+      </div>
+      <div style="padding: 20px; border: 1px solid #e2e8f0; border-top: none;">
+        <p>Hi ${escapeHtml(name || 'there')},</p>
+        <p>${total} claim${total === 1 ? ' needs' : 's need'} your attention.</p>
+        ${parts.join('')}
+        <a href="${appUrl}/dashboard" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Open DentalAppeal</a>
+      </div>
+      <div style="text-align: center; padding: 20px; color: #64748b; font-size: 12px;">
+        <p>DentalAppeal - AI-Powered Insurance Appeals</p>
+      </div>
+    </div>
+  `;
+  return sendEmail({ to: email, subject, html });
+};

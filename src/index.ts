@@ -22,6 +22,7 @@ import insuranceRouter from './routes/insurance';
 import affiliateRouter from './routes/affiliate';
 import adminEmailTemplatesRouter from './routes/adminEmailTemplates';
 import calculatorRouter from './routes/calculator';
+import { scheduleAppealReminders } from './jobs/appealReminders';
 import {
   apiLimiter, authLimiter, loginPerAccountLimiter, twoFactorLimiter,
   emailFormLimiter, emailRecipientLimiter, trackLimiter,
@@ -85,4 +86,5 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
+  scheduleAppealReminders();
 });
