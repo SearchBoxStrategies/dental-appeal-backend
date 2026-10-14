@@ -61,8 +61,10 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     return res.status(400).json({ error: `Missing column(s): ${missingColumns.join(', ')}. Download the template for the expected format.` });
   }
 
-  const { rows: insurers } = await db.query('SELECT id, name, appeal_window_days FROM insurance_companies');
-  const insurerByName = new Map(insurers.map((i) => [String(i.name).toLowerCase(), i]));
+  type Insurer = { id: number; name: string; appeal_window_days: number | null };
+  const { rows: insurerRows } = await db.query('SELECT id, name, appeal_window_days FROM insurance_companies');
+  const insurerByName = new Map<string, Insurer>();
+  for (const i of insurerRows as Insurer[]) insurerByName.set(String(i.name).toLowerCase(), i);
 
   let successful = 0;
   const errors: { row: number; message: string }[] = [];
