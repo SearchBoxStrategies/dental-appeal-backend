@@ -453,10 +453,12 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
     const nextTier = await getNextTierInfo(affiliate.id);
     
     const { rows: referrals } = await db.query(
-      `SELECT id, referral_code, status, clicked_at, signed_up_at, converted_at, practice_id
-       FROM affiliate_referrals 
-       WHERE affiliate_id = $1 
-       ORDER BY clicked_at DESC 
+      `SELECT ar.id, ar.referral_code, ar.status, ar.clicked_at, ar.signed_up_at, ar.converted_at,
+              ar.practice_id, p.name AS practice_name, p.subscription_status
+       FROM affiliate_referrals ar
+       LEFT JOIN practices p ON p.id = ar.practice_id
+       WHERE ar.affiliate_id = $1
+       ORDER BY ar.clicked_at DESC
        LIMIT 50`,
       [affiliate.id]
     );

@@ -83,6 +83,7 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
     await client.query(
       `UPDATE affiliate_referrals
        SET practice_id = $1,
+           status = 'converted',
            converted_at = NOW(),
            subscription_id = $2,
            first_payment_date = NOW()
@@ -177,6 +178,79 @@ async function createRecurringAffiliateCommission(practiceId: number, invoice: S
   } finally {
     client.release();
   }
+}
+
+// Records a subscription payment (positive) or refund (negative) against the practice that owns
+// the Stripe customer. `ref` is unique per Stripe event source, so redelivered events are ignored.
+// Returns true when a new row was written.
+async function recordPayment(
+  customerId: string,
+  amount: number,
+  ref: string,
+  status: 'succeeded' | 'refunded'
+): Promise<boolean> {
+  const { db } = await import('../db');
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [owner] } = await client.query(
+      `SELECT p.id AS practice_id, u.id AS user_id, u.email, u.name
+       FROM practices p
+       JOIN users u ON u.practice_id = p.id AND COALESCE(u.user_type, 'clinic') <> 'affiliate'
+       WHERE p.stripe_customer_id = $1
+       ORDER BY u.created_at ASC
+       LIMIT 1`,
+      [customerId]
+    );
+    if (!owner) {
+      await client.query('ROLLBACK');
+      console.log(`No practice for Stripe customer ${customerId} - payment not recorded`);
+      return false;
+    }
+
+    const { rowCount } = await client.query(
+      `INSERT INTO payments (user_id, amount_paid, payment_method, status, stripe_payment_intent_id,
+                             user_email, user_name, created_at)
+       VALUES ($1, $2, 'card', $3, $4, $5, $6, NOW())
+       ON CONFLICT (stripe_payment_intent_id) WHERE stripe_payment_intent_id IS NOT NULL DO NOTHING`,
+      [owner.user_id, amount, status, ref, owner.email, owner.name]
+    );
+    if (!rowCount) {
+      await client.query('ROLLBACK');
+      return false;
+    }
+
+    await client.query(
+      `UPDATE practices
+       SET total_paid = GREATEST(COALESCE(total_paid, 0) + $1::numeric, 0),
+           last_payment_date = CASE WHEN $1::numeric > 0 THEN NOW() ELSE last_payment_date END,
+           last_payment_amount = CASE WHEN $1::numeric > 0 THEN $1::numeric ELSE last_payment_amount END
+       WHERE id = $2`,
+      [amount, owner.practice_id]
+    );
+    await client.query('COMMIT');
+    console.log(`💵 Recorded ${status} of $${amount.toFixed(2)} for practice ${owner.practice_id}`);
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Refunds: charge.amount_refunded is cumulative, so record only the part not yet recorded.
+async function recordRefund(charge: Stripe.Charge) {
+  const customerId = typeof charge.customer === 'string' ? charge.customer : charge.customer?.id;
+  if (!customerId || !charge.amount_refunded) return;
+  const { db } = await import('../db');
+  const { rows: [prior] } = await db.query(
+    `SELECT COALESCE(-SUM(amount_paid), 0) AS refunded FROM payments WHERE stripe_payment_intent_id LIKE $1`,
+    [`refund:${charge.id}:%`]
+  );
+  const delta = roundCents(charge.amount_refunded / 100 - parseFloat(prior.refunded));
+  if (delta <= 0) return;
+  await recordPayment(customerId, -delta, `refund:${charge.id}:${charge.amount_refunded}`, 'refunded');
 }
 
 // Helper: Claw back commission when a subscription payment is refunded.
@@ -353,6 +427,20 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       console.log(`   Customer: ${invoice.customer}`);
       console.log(`   Amount: $${(invoice.amount_paid / 100).toFixed(2)}`);
       
+      // Revenue: every paid invoice, the first one included.
+      if (invoice.customer && invoice.amount_paid > 0) {
+        try {
+          await recordPayment(
+            typeof invoice.customer === 'string' ? invoice.customer : invoice.customer.id,
+            roundCents(invoice.amount_paid / 100),
+            invoice.id,
+            'succeeded'
+          );
+        } catch (error) {
+          console.error('❌ Failed to record payment:', error);
+        }
+      }
+
       if (invoice.subscription && invoice.customer) {
         try {
           const { db } = await import('../db');
@@ -419,6 +507,11 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       const charge = event.data.object as Stripe.Charge;
       console.log(`↩️ Charge refunded: ${charge.id} ($${(charge.amount_refunded / 100).toFixed(2)} of $${(charge.amount / 100).toFixed(2)})`);
       await reverseCommissionForRefund(charge);
+      try {
+        await recordRefund(charge);
+      } catch (error) {
+        console.error('❌ Failed to record refund:', error);
+      }
       break;
     }
 

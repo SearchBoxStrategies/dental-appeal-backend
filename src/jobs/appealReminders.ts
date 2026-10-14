@@ -57,9 +57,11 @@ export async function processAppealReminders(): Promise<{ practices: number; cla
       let claims = 0;
       for (const [practiceId, group] of byPractice) {
         const { rows: users } = await conn.query(
-          `SELECT email, name FROM users
-           WHERE practice_id = $1 AND deleted_at IS NULL AND is_active IS NOT FALSE
-             AND COALESCE(user_type, 'clinic') <> 'affiliate' AND COALESCE(is_admin, false) = false`,
+          `SELECT u.email, u.name FROM users u
+           LEFT JOIN email_preferences ep ON ep.user_id = u.id
+           WHERE u.practice_id = $1 AND u.deleted_at IS NULL AND u.is_active IS NOT FALSE
+             AND COALESCE(u.user_type, 'clinic') <> 'affiliate' AND COALESCE(u.is_admin, false) = false
+             AND COALESCE(ep.appeal_updates, true)`,
           [practiceId]
         );
         let delivered = false;

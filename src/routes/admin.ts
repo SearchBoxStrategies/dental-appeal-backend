@@ -851,7 +851,7 @@ router.get('/payments', authenticate, requireAdmin, async (req, res) => {
         COUNT(*) as total_transactions,
         COUNT(DISTINCT user_id) as unique_customers
       FROM payments
-      WHERE status = 'succeeded'
+      WHERE status IN ('succeeded', 'refunded')
     `);
     
     res.json({ 
@@ -876,7 +876,7 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
         COALESCE(SUM(amount_paid), 0) as total,
         COUNT(*) as count
       FROM payments
-      WHERE status = 'succeeded'
+      WHERE status IN ('succeeded', 'refunded')
         AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW())
     `);
     
@@ -885,7 +885,7 @@ router.get('/payments/summary', authenticate, requireAdmin, async (req, res) => 
         COALESCE(SUM(amount_paid), 0) as total,
         COUNT(*) as count
       FROM payments
-      WHERE status = 'succeeded'
+      WHERE status IN ('succeeded', 'refunded')
         AND DATE_TRUNC('month', created_at) = DATE_TRUNC('month', NOW() - INTERVAL '1 month')
     `);
     
@@ -986,7 +986,7 @@ router.get('/settings', authenticate, requireAdmin, async (req, res) => {
       siteName: 'DentalAppeal',
       supportEmail: 'support@dentalappeal.claims',
       defaultPlanPrice: 199,
-      trialDays: 14,
+      trialDays: parseInt(process.env.TRIAL_DAYS ?? '14', 10),
       maintenanceMode: false,
       enableEmailNotifications: true,
       enableWeeklyDigest: true
