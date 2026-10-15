@@ -23,6 +23,7 @@ import affiliateRouter from './routes/affiliate';
 import adminEmailTemplatesRouter from './routes/adminEmailTemplates';
 import calculatorRouter from './routes/calculator';
 import { scheduleAppealReminders } from './jobs/appealReminders';
+import { scheduleHeartbeat, touchHeartbeat } from './jobs/heartbeat';
 import {
   apiLimiter, authLimiter, loginPerAccountLimiter, twoFactorLimiter,
   emailFormLimiter, emailRecipientLimiter, trackLimiter,
@@ -83,8 +84,21 @@ app.use('/api', calculatorRouter);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 
+// Checks the database too and records a heartbeat. Called once a day by the GitHub keep-alive
+// workflow; a failure here means the database is down or paused.
+app.get('/api/health/db', async (_req, res) => {
+  try {
+    const at = await touchHeartbeat('external');
+    res.json({ status: 'ok', db: 'ok', at });
+  } catch (error) {
+    console.error('DB health check failed:', error);
+    res.status(503).json({ status: 'error', db: 'unreachable' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`\n🚀 Server running on port ${PORT}`);
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
   scheduleAppealReminders();
+  scheduleHeartbeat();
 });
