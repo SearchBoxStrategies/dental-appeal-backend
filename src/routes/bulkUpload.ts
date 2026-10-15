@@ -4,6 +4,7 @@ import csv from 'csv-parser';
 import { Readable } from 'stream';
 import { db } from '../db';
 import { authenticate } from '../middleware/auth';
+import { normalizeCode, isValidCodeFormat } from '../utils/procedureCodes';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -79,7 +80,8 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     const dob = isoDate(row.patient_dob);
     const serviceDate = isoDate(row.service_date);
     const denialDate = row.denial_date?.trim() ? isoDate(row.denial_date) : null;
-    const codes = (row.procedure_codes || '').split(/[\s,;]+/).map((c) => c.trim().toUpperCase()).filter(Boolean);
+    const codes = [...new Set((row.procedure_codes || '').split(/[\s,;]+/).filter(Boolean).map(normalizeCode))];
+    const badCodes = codes.filter((c) => !isValidCodeFormat(c));
     const claimed = amount(row.amount_claimed);
     const denied = amount(row.amount_denied);
 
@@ -87,6 +89,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
     if (!dob) problems.push('patient_dob must be YYYY-MM-DD');
     if (!insurance) problems.push('insurance_company is empty');
     if (!codes.length) problems.push('procedure_codes is empty');
+    if (badCodes.length) problems.push(`procedure code(s) ${badCodes.join(', ')} not valid (use D2740 or 27211 style)`);
     if (!denialReason) problems.push('denial_reason is empty');
     if (!serviceDate) problems.push('service_date must be YYYY-MM-DD');
     if (row.denial_date?.trim() && !denialDate) problems.push('denial_date must be YYYY-MM-DD');

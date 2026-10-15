@@ -6,9 +6,11 @@ const router = Router();
 
 router.get('/', authenticate, async (req, res) => {
   try {
-    // Remove 'full_descriptor' - it doesn't exist in your table
+    // Active codes only; retired codes stay in the table for older claims.
     const { rows } = await db.query(
-      'SELECT code, category, description FROM cdt_codes ORDER BY category, code'
+      `SELECT code, category, description, COALESCE(system, 'CDT') AS system
+       FROM cdt_codes WHERE COALESCE(is_active, true)
+       ORDER BY category, code`
     );
     
     // Group by category for frontend

@@ -7,6 +7,7 @@ import { requireActiveSubscription } from '../middleware/subscription';
 import { aiLimiter } from '../middleware/rateLimit';
 import { extractClaimFromDocument, draftDentistNote, ClaudeError } from '../services/claude';
 import { buildChecklist } from '../services/checklist';
+import { normalizeCode, isValidCodeFormat, CODE_FORMAT_HELP, lookupCodeDescriptions } from '../utils/procedureCodes';
 import multer from 'multer';
 
 const router = Router();
@@ -66,9 +67,13 @@ router.post('/extract', authenticate, requireActiveSubscription, aiLimiter, (req
         }
       }
 
+      // Keep well-formed codes; anything else is left for the receptionist to check.
+      const codes = [...new Set(extracted.procedureCodes.map(normalizeCode))];
+      if (codes.some((code) => !isValidCodeFormat(code))) uncertain.add('procedureCodes');
+
       res.json({
         ...extracted,
-        procedureCodes: extracted.procedureCodes.map((code) => code.trim().toUpperCase()),
+        procedureCodes: codes.filter(isValidCodeFormat),
         insuranceCompanyId,
         uncertainFields: [...uncertain],
       });
@@ -272,7 +277,9 @@ const claimSchema = z.object({
   insuranceCompanyId: z.number().optional(),
   policyNumber: z.string().nullable().optional(),  // ← Allow null
   claimNumber: z.string().nullable().optional(),   // ← Allow null
-  procedureCodes: z.array(z.string()).min(1),
+  procedureCodes: z.array(z.string().transform(normalizeCode).refine(isValidCodeFormat, CODE_FORMAT_HELP))
+    .min(1)
+    .transform((codes) => [...new Set(codes)]),
   denialReason: z.string().min(1),
   serviceDate: z.string(),
   amountClaimed: z.number().nullable().optional(),
@@ -388,6 +395,7 @@ router.post('/:id/dentist-note/draft', authenticate, requireActiveSubscription, 
       serviceDate: claim.service_date,
       insuranceCompany: claim.insurance_company,
       checklist: buildChecklist(claim.procedure_codes, claim.denial_reason).map((item) => item.label),
+      codeDescriptions: await lookupCodeDescriptions(claim.procedure_codes || []),
     });
     const { rows: [updated] } = await db.query(
       `UPDATE claims SET dentist_note = $1, dentist_note_approved_at = NULL,

@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
+import { codeSystem } from '../utils/procedureCodes';
 
 const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
 
@@ -78,6 +79,8 @@ export interface ClaimDetails {
   dentistNoteApprovedBy?: string | null;
   // Documents the clinic is enclosing with the appeal.
   enclosures?: string[];
+  // Descriptions of the procedure codes, from the code table.
+  codeDescriptions?: Record<string, string>;
 }
 
 export interface PracticeProfile {
@@ -145,8 +148,14 @@ const procedureDescriptions: Record<string, string> = {
   D9110: 'Palliative treatment'
 };
 
-const describeCodes = (codes: string[]) =>
-  codes.map((code) => `${code} — ${procedureDescriptions[code] || 'Dental procedure'}`).join('\n  ');
+// "D2740 — Crown - porcelain/ceramic". Descriptions from the code table win over the short
+// built-in list; a code in neither is shown with its coding system rather than a guess.
+const describeCodes = (codes: string[], descriptions: Record<string, string> = {}) =>
+  codes.map((code) => {
+    const description = descriptions[code] || procedureDescriptions[code];
+    if (description) return `${code} — ${description}`;
+    return `${code} (${codeSystem(code) === 'USCLS' ? 'Canadian USC&LS code' : 'US CDT code'})`;
+  }).join('\n  ');
 
 const money = (amount: number | null) => (amount != null ? `$${amount.toFixed(2)}` : 'Not provided');
 
@@ -167,7 +176,8 @@ What wins dental appeals:
 Rules:
 - Use only the facts provided. Never invent clinical findings, measurements, dates, tooth numbers or history. Where the letter needs a fact you do not have, write a short placeholder in square brackets, such as [tooth number] or [pocket depths], so the clinic fills it in before sending.
 - Do not include the practice letterhead (name, address, phone); the app prints it above your letter. Start with the date line.
-- Plain text only: no markdown, no asterisks, no headings with # symbols.`;
+- Plain text only: no markdown, no asterisks, no headings with # symbols.
+- Procedure codes are ADA CDT codes (US, like D2740) or CDA USC&LS codes (Canada, five digits). Where a code has no description, refer to it by its code and describe the treatment only from the dentist's note; never guess what a code means.`;
 
 export async function generateAppealLetter(
   claim: ClaimDetails,
@@ -214,7 +224,7 @@ Policy / member ID: ${claim.policyNumber || 'Not provided'}
 Claim number: ${claim.claimNumber || 'Not provided'}
 Date of service: ${claim.serviceDate}
 ${claim.denialDate ? `Date of denial: ${claim.denialDate}\n` : ''}Procedures:
-  ${describeCodes(claim.procedureCodes)}
+  ${describeCodes(claim.procedureCodes, claim.codeDescriptions)}
 Amount billed: ${money(claim.amountClaimed)}
 Amount denied: ${money(claim.amountDenied)}
 
@@ -249,6 +259,8 @@ Write the narrative in the first person as the treating dentist, in the style of
 
 Never invent clinical facts. Every finding, measurement, tooth number, date or history item you do not have must be a placeholder in square brackets that tells the dentist what to fill in, such as [pocket depths, e.g. 5-6 mm on teeth #2-#5] or [date of prior crown placement]. Focus the narrative on what this denial reason needs to be overturned.
 
+If a procedure code has no description, do not guess what it is; write a placeholder such as [procedure performed].
+
 Plain text, 120 to 250 words, no headings, no markdown.`;
 
 export async function draftDentistNote(claim: {
@@ -257,13 +269,14 @@ export async function draftDentistNote(claim: {
   serviceDate: string;
   insuranceCompany: string;
   checklist: string[];
+  codeDescriptions?: Record<string, string>;
 }): Promise<{ note: string; model: string }> {
   const prompt = `Draft the clinical narrative for this appeal.
 
 Insurer: ${claim.insuranceCompany}
 Date of service: ${claim.serviceDate}
 Procedures:
-  ${describeCodes(claim.procedureCodes)}
+  ${describeCodes(claim.procedureCodes, claim.codeDescriptions)}
 
 Denial reason:
 ${claim.denialReason}

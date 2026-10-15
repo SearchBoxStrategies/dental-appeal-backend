@@ -6,6 +6,7 @@ import { requireActiveSubscription } from '../middleware/subscription';
 import { aiLimiter } from '../middleware/rateLimit';
 import { generateAppealLetter, ClaudeError } from '../services/claude';
 import { buildChecklist } from '../services/checklist';
+import { lookupCodeDescriptions } from '../utils/procedureCodes';
 
 const router = Router();
 
@@ -69,6 +70,7 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, aiLim
         dentistNote: claim.dentist_note_approved_at ? claim.dentist_note : null,
         dentistNoteApprovedBy: claim.dentist_note_approved_by,
         enclosures,
+        codeDescriptions: await lookupCodeDescriptions(claim.procedure_codes || []),
       },
       {
         name: practice?.name || 'Dental Practice',

@@ -1,4 +1,5 @@
 import { db } from '../db';
+import { normalizeCode, isValidCodeFormat, CODE_FORMAT_HELP } from '../utils/procedureCodes';
 
 export interface ValidationResult {
   passed: boolean;
@@ -36,18 +37,13 @@ export const validateClaim = async (claimData: any, claimId?: number): Promise<V
     }
   }
   
-  // 2. Validate procedure codes are valid
-  const validCodes = ['D0120', 'D0140', 'D0210', 'D0220', 'D0270', 'D0330', 
-    'D1110', 'D1120', 'D1206', 'D1351', 'D2140', 'D2150', 'D2160', 'D2330', 
-    'D2331', 'D2332', 'D2391', 'D2392', 'D2393', 'D2394', 'D2740', 'D2750', 
-    'D2751', 'D3310', 'D3320', 'D3330', 'D4341', 'D4355', 'D4910', 'D5110',
-    'D5120', 'D5211', 'D5212', 'D6010', 'D6056', 'D7140', 'D7210', 'D7240', 'D9110'];
-    
-  const procedureCodes = claim.procedure_codes || claimData.procedure_codes || [];
+  // 2. Procedure codes must be correctly formatted (US CDT or Canadian USC&LS). Which codes
+  // exist changes every year, so a well-formed code we don't list is not an error.
+  const procedureCodes: string[] = claim.procedure_codes || claimData.procedure_codes || [];
   for (const code of procedureCodes) {
-    if (!validCodes.includes(code)) {
-      errors.push(`Procedure code ${code} may not be valid. Verify with insurance provider.`);
-      details.push({ type: 'coding', code, message: 'Invalid procedure code', severity: 'error' });
+    if (!isValidCodeFormat(normalizeCode(code))) {
+      errors.push(`Procedure code "${code}" is not a valid format. ${CODE_FORMAT_HELP}.`);
+      details.push({ type: 'coding', code, message: 'Badly formatted procedure code', severity: 'error' });
     }
   }
   
