@@ -81,6 +81,8 @@ export interface ClaimDetails {
   enclosures?: string[];
   // Descriptions of the procedure codes, from the code table.
   codeDescriptions?: Record<string, string>;
+  // Appeals mailing address printed on the denial notice (wins over our insurer list).
+  insurerAppealsAddress?: string | null;
 }
 
 export interface PracticeProfile {
@@ -133,7 +135,8 @@ What wins dental appeals:
 - Keep it to one page where possible. Professional, firm, not emotional.
 
 Rules:
-- Use only the facts provided. Never invent clinical findings, measurements, dates, tooth numbers or history. Where the letter needs a fact you do not have, write a short placeholder in square brackets, such as [tooth number] or [pocket depths], so the clinic fills it in before sending.
+- Use only the facts provided. Never invent clinical findings, measurements, dates, tooth numbers or history. Where the letter needs a fact you do not have, write a short placeholder in square brackets, such as [tooth number] or [pocket depths], so the clinic fills it in before sending. Facts stated in the denial reason or the dentist's note (for example a tooth number) are known facts: use them.
+- Make one clear argument. Do not include optional or conditional paragraphs, alternative arguments, or notes and instructions addressed to the clinic. The letter must read as ready to send once the bracketed facts are filled in.
 - Do not include the practice letterhead (name, address, phone); the app prints it above your letter. Start with the date line.
 - Plain text only: no markdown, no asterisks, no headings with # symbols.
 - Procedure codes are ADA CDT codes (US, like D2740) or CDA USC&LS codes (Canada, five digits). Where a code has no description, refer to it by its code and describe the treatment only from the dentist's note; never guess what a code means.`;
@@ -148,10 +151,11 @@ export async function generateAppealLetter(
     practice.provider_license ? `License: ${practice.provider_license}` : '',
   ].filter(Boolean).join(' | ');
 
-  const insurerAddress = practice.insuranceCompany
-    ? [practice.insuranceCompany.appeals_department, practice.insuranceCompany.appeals_address]
-        .filter(Boolean).join('\n')
-    : '';
+  const insurerAddress = claim.insurerAppealsAddress?.trim()
+    || (practice.insuranceCompany
+      ? [practice.insuranceCompany.appeals_department, practice.insuranceCompany.appeals_address]
+          .filter(Boolean).join('\n')
+      : '');
 
   const today = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
@@ -264,7 +268,7 @@ const EXTRACTION_SCHEMA = {
   required: [
     'isDenialNotice', 'patientName', 'patientDob', 'insuranceCompany', 'policyNumber',
     'claimNumber', 'serviceDate', 'denialDate', 'procedureCodes', 'amountClaimed',
-    'amountDenied', 'denialReason', 'uncertainFields',
+    'amountDenied', 'denialReason', 'appealsAddress', 'uncertainFields',
   ],
   properties: {
     isDenialNotice: { type: 'boolean' },
@@ -279,6 +283,7 @@ const EXTRACTION_SCHEMA = {
     amountClaimed: nullable('number'),
     amountDenied: nullable('number'),
     denialReason: nullable('string'),
+    appealsAddress: nullable('string'),
     uncertainFields: { type: 'array', items: { type: 'string' } },
   },
 };
@@ -296,6 +301,7 @@ const extractionResult = z.object({
   amountClaimed: z.number().nullable(),
   amountDenied: z.number().nullable(),
   denialReason: z.string().nullable(),
+  appealsAddress: z.string().nullable(),
   uncertainFields: z.array(z.string()),
 });
 
@@ -306,6 +312,7 @@ const EXTRACTION_SYSTEM_PROMPT = `You read dental insurance denial notices: Expl
 - Dates: return YYYY-MM-DD. If a date is ambiguous or unreadable, return null and list the field in uncertainFields.
 - procedureCodes: the CDA or ADA CDT codes of the denied or reduced lines only, e.g. "D2740". Prefix US codes with "D" if the document omits it. Canadian 5-digit codes stay as printed.
 - amountClaimed: total submitted for those lines. amountDenied: the amount not paid on those lines.
+- appealsAddress: the mailing address the notice says appeals or reviews should be sent to, as printed, with line breaks between lines (include the department name if given). null if the notice gives none; do not use the insurer's general or return address unless the notice says to send appeals there.
 - denialReason: the insurer's explanation in full, including remark or reason codes and their text, e.g. "Code 147: Frequency limitation - benefit allowed once every 5 years".
 - uncertainFields: names of fields you could not read clearly or had to infer.
 - If there are several patients or claims, use the first denied claim and add "multipleClaims" to uncertainFields.

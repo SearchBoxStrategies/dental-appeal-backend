@@ -285,6 +285,7 @@ const claimSchema = z.object({
   amountClaimed: z.number().nullable().optional(),
   amountDenied: z.number().nullable().optional(),
   denialDate: isoDate.nullable().optional(),
+  insurerAppealsAddress: z.string().trim().max(500).nullable().optional(),
 });
 
 router.post('/', authenticate, async (req, res) => {
@@ -296,9 +297,9 @@ router.post('/', authenticate, async (req, res) => {
          practice_id, created_by, patient_name, patient_dob, insurance_company,
          insurance_company_id, policy_number, claim_number, procedure_codes, 
          denial_reason, service_date, amount_claimed, amount_denied,
-         denial_date, appeal_deadline
+         denial_date, insurer_appeals_address, appeal_deadline
        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::date,
+         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::date, $15,
          -- Deadline: the insurer's appeal window counted from the denial date (or today).
          COALESCE($14::date, CURRENT_DATE)
            + COALESCE((SELECT appeal_window_days FROM insurance_companies WHERE id = $6), 180)
@@ -319,6 +320,7 @@ router.post('/', authenticate, async (req, res) => {
         data.amountClaimed ?? null,
         data.amountDenied ?? null,
         data.denialDate ?? null,
+        data.insurerAppealsAddress || null,
       ]
     );
 

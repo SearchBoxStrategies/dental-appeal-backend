@@ -71,6 +71,7 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, aiLim
         dentistNoteApprovedBy: claim.dentist_note_approved_by,
         enclosures,
         codeDescriptions: await lookupCodeDescriptions(claim.procedure_codes || []),
+        insurerAppealsAddress: claim.insurer_appeals_address,
       },
       {
         name: practice?.name || 'Dental Practice',
