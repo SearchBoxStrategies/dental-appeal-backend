@@ -274,7 +274,7 @@ const claimSchema = z.object({
   patientName: z.string().min(1),
   patientDob: z.string(),
   insuranceCompany: z.string().min(1),
-  insuranceCompanyId: z.number().optional(),
+  insuranceCompanyId: z.number().int().positive().nullable().optional(),
   policyNumber: z.string().nullable().optional(),  // ← Allow null
   claimNumber: z.string().nullable().optional(),   // ← Allow null
   procedureCodes: z.array(z.string().transform(normalizeCode).refine(isValidCodeFormat, CODE_FORMAT_HELP))
