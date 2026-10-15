@@ -108,65 +108,65 @@ const CODE_RULES: CodeRule[] = [
 
 const REASON_RULES: ReasonRule[] = [
   {
-    match: /frequen|limitation|once (every|per)|too soon|interval/i,
+    match: /\bfrequen|\blimitation\b|\bonce (every|per)\b|\btoo soon\b|\binterval\b/i,
     items: [
       { id: 'frequency-history', label: 'Treatment history with dates for this procedure', why: 'Shows the frequency limit was met, or why an exception was needed.' },
       { id: 'frequency-narrative', label: 'Narrative of the change in condition that required earlier treatment', why: 'Insurers make exceptions for documented new disease or trauma.' },
     ],
   },
   {
-    match: /necess|not (clinically )?indicated|not supported|insufficient (clinical|documentation)/i,
+    match: /\bnecess|\bnot (clinically )?indicated\b|\bnot supported\b|\binsufficient (clinical|documentation)\b/i,
     items: [
       { id: 'necessity-narrative', label: 'Dentist\'s clinical narrative explaining medical necessity', why: 'The core of a medical-necessity appeal.' },
       { id: 'necessity-images', label: 'Diagnostic x-rays and photos supporting the diagnosis', why: 'Reviewers decide on the images.' },
     ],
   },
   {
-    match: /missing tooth|prior to (coverage|effective)|pre-?existing/i,
+    match: /\bmissing tooth\b|\bprior to (coverage|effective)\b|\bpre-?existing\b/i,
     items: [
       { id: 'extraction-proof', label: 'Records showing when the tooth was lost', why: 'Proves the tooth was lost while covered, or the clause does not apply.' },
       { id: 'prior-coverage', label: 'Proof of prior continuous dental coverage', why: 'Many plans waive the clause with continuous coverage.' },
     ],
   },
   {
-    match: /alternate|alternative|least costly|downgrad|LEAT/i,
+    match: /\balternat(e|ive)\b|\bleast (costly|expensive)\b|\bdowngrad|\bLEAT\b/i,
     items: [
       { id: 'material-narrative', label: 'Narrative: why the alternate (cheaper) treatment would fail', why: 'Overturns "least expensive alternative treatment" reductions.' },
     ],
   },
   {
-    match: /x-?ray|radiograph|image|documentation|information|records|narrative|chart/i,
+    match: /\b(submit|send|provide|attach|need(ed)?|requir(e|ed)|request(ed)?|missing|additional|insufficient|incomplete|no)\b[^.]{0,40}\b(x-?rays?|radiographs?|images?|documentation|information|records|narratives?|chart(s|ing)?)\b|\b(x-?rays?|radiographs?|documentation|information|records|narratives?|charting)\b[^.]{0,30}\b(required|requested|needed|missing|not (received|submitted|provided))\b/i,
     items: [
       { id: 'requested-records', label: 'The specific records the insurer asked for', why: 'Many denials are simply missing paperwork.' },
     ],
   },
   {
-    match: /timely|filing limit|late/i,
+    match: /\btimely\b|\bfiling (limit|deadline)|\blate (filing|submission|claim)\b|\bsubmitted (too )?late\b/i,
     items: [
       { id: 'timely-proof', label: 'Clearinghouse report or proof of the original submission date', why: 'Shows the claim was filed on time.' },
     ],
   },
   {
-    match: /coordination|COB|other (insurance|coverage)|primary/i,
+    match: /\bcoordination of benefits\b|\bCOB\b|\bother (insurance|coverage)\b|\bprimary (carrier|insurance|insurer|plan|payer)\b/i,
     items: [
       { id: 'primary-eob', label: 'Primary insurer\'s EOB', why: 'Required for the secondary insurer to pay.' },
       { id: 'cob-form', label: 'Patient\'s completed coordination of benefits form', why: 'Confirms which plan is primary.' },
     ],
   },
   {
-    match: /eligib|not covered on|terminat|inactive/i,
+    match: /\beligib|\bnot covered on\b|\bcoverage (terminated|ended)\b|\bterminat(ed|ion)\b|\binactive\b/i,
     items: [
       { id: 'eligibility-proof', label: 'Eligibility verification from the date of service', why: 'Shows the patient was covered when treated.' },
     ],
   },
   {
-    match: /duplicate/i,
+    match: /\bduplicate\b/i,
     items: [
       { id: 'duplicate-explain', label: 'Explanation of how this service differs from the earlier claim (tooth, surface, date)', why: 'Clarifies it is not a resubmission of the same service.' },
     ],
   },
   {
-    match: /pre-?(auth|determination|treatment estimate)/i,
+    match: /\bpre-?(auth|authori[sz]ation|determination)|\bprior authori[sz]ation\b|\bpre-?treatment estimate\b/i,
     items: [
       { id: 'preauth', label: 'Pre-authorization or predetermination approval, or reason treatment could not wait', why: 'Emergency treatment is often exempt.' },
     ],
