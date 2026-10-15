@@ -107,52 +107,11 @@ export interface PracticeProfile {
   } | null;
 }
 
-const procedureDescriptions: Record<string, string> = {
-  D0120: 'Periodic oral evaluation',
-  D0140: 'Limited oral evaluation',
-  D0210: 'Complete series of x-rays',
-  D0220: 'Periapical x-ray',
-  D0270: 'Bitewing x-ray',
-  D0330: 'Panoramic x-ray',
-  D1110: 'Prophylaxis - adult',
-  D1120: 'Prophylaxis - child',
-  D1206: 'Topical fluoride varnish',
-  D1351: 'Sealant',
-  D2140: 'Amalgam - one surface',
-  D2150: 'Amalgam - two surfaces',
-  D2160: 'Amalgam - three surfaces',
-  D2330: 'Composite - one surface, anterior',
-  D2331: 'Composite - two surfaces, anterior',
-  D2332: 'Composite - three surfaces, anterior',
-  D2391: 'Composite - one surface, posterior',
-  D2392: 'Composite - two surfaces, posterior',
-  D2393: 'Composite - three surfaces, posterior',
-  D2394: 'Composite - four+ surfaces, posterior',
-  D2740: 'Crown - porcelain/ceramic',
-  D2750: 'Crown - porcelain fused to metal',
-  D3310: 'Root canal - anterior',
-  D3320: 'Root canal - bicuspid',
-  D3330: 'Root canal - molar',
-  D4341: 'Periodontal scaling and root planing',
-  D4355: 'Full mouth debridement',
-  D4910: 'Periodontal maintenance',
-  D5110: 'Complete denture - upper',
-  D5120: 'Complete denture - lower',
-  D5211: 'Partial denture - upper',
-  D5212: 'Partial denture - lower',
-  D6010: 'Surgical placement of implant',
-  D6056: 'Prefabricated abutment',
-  D7140: 'Extraction - simple',
-  D7210: 'Extraction - surgical',
-  D7240: 'Extraction - impacted',
-  D9110: 'Palliative treatment'
-};
-
-// "D2740 — Crown - porcelain/ceramic". Descriptions from the code table win over the short
-// built-in list; a code in neither is shown with its coding system rather than a guess.
+// "D2740 — <description>" when the licensed code table has a description; otherwise the code
+// with its coding system, never a guess. No code descriptions are built into the app.
 const describeCodes = (codes: string[], descriptions: Record<string, string> = {}) =>
   codes.map((code) => {
-    const description = descriptions[code] || procedureDescriptions[code];
+    const description = descriptions[code];
     if (description) return `${code} — ${description}`;
     return `${code} (${codeSystem(code) === 'USCLS' ? 'Canadian USC&LS code' : 'US CDT code'})`;
   }).join('\n  ');
