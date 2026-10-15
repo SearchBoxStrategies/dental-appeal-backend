@@ -9,7 +9,9 @@ const router = Router();
 router.get('/', authenticate, async (req, res) => {
   try {
     const { rows } = await db.query(
-      'SELECT id, name, code, appeals_address, appeals_department, timely_filing_days FROM insurance_companies WHERE is_active = TRUE ORDER BY name'
+      `SELECT id, name, code, appeals_address, appeals_department, timely_filing_days,
+              COALESCE(country, 'US') AS country, appeal_window_days
+       FROM insurance_companies WHERE is_active = TRUE ORDER BY country DESC, name`
     );
     res.json(rows);
   } catch (error) {

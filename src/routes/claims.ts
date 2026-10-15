@@ -300,9 +300,12 @@ router.post('/', authenticate, async (req, res) => {
          denial_date, insurer_appeals_address, appeal_deadline
        ) VALUES (
          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::date, $15,
-         -- Deadline: the insurer's appeal window counted from the denial date (or today).
+         -- Deadline: the insurer's appeal window counted from the denial date (or today). A listed
+         -- insurer with no standard window (Canada) gets no deadline: the clinic enters it from the
+         -- denial notice. Unlisted insurers get the common 180 days.
          COALESCE($14::date, CURRENT_DATE)
-           + COALESCE((SELECT appeal_window_days FROM insurance_companies WHERE id = $6), 180)
+           + CASE WHEN $6::int IS NULL THEN 180
+                  ELSE (SELECT appeal_window_days FROM insurance_companies WHERE id = $6::int) END
        )
        RETURNING *`,
       [
@@ -466,7 +469,8 @@ router.patch('/:id/deadline', authenticate, async (req, res) => {
            appeal_deadline = CASE
              WHEN $3::date IS NOT NULL THEN $3::date
              WHEN $1::boolean THEN COALESCE($2::date, c.created_at::date)
-               + COALESCE((SELECT appeal_window_days FROM insurance_companies WHERE id = c.insurance_company_id), 180)
+               + CASE WHEN c.insurance_company_id IS NULL THEN 180
+                      ELSE (SELECT appeal_window_days FROM insurance_companies WHERE id = c.insurance_company_id) END
              ELSE c.appeal_deadline
            END,
            deadline_reminder_sent_at = NULL,

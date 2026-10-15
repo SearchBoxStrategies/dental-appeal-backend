@@ -113,7 +113,7 @@ router.post('/upload', authenticate, upload.single('file'), async (req, res) => 
         [
           practiceId, userId, patientName, dob, insurer?.name ?? insurance, insurer?.id ?? null,
           row.policy_number?.trim() || null, row.claim_number?.trim() || null, codes, denialReason, serviceDate,
-          claimed, denied, denialDate, insurer?.appeal_window_days ?? 180,
+          claimed, denied, denialDate, insurer ? insurer.appeal_window_days : 180,
         ]
       );
       successful++;
