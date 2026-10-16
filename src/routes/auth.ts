@@ -48,7 +48,7 @@ router.post('/register', async (req, res) => {
         if (affiliate) {
           referredByAffiliateId = affiliate.id;
           await client.query(
-            `UPDATE affiliate_referrals 
+            `UPDATE affiliate_referrals
              SET signed_up_at = NOW(), status = 'signed_up'
              WHERE referral_code = $1 AND signed_up_at IS NULL`,
             [referralCode]
@@ -61,17 +61,17 @@ router.post('/register', async (req, res) => {
         'SELECT id FROM practices WHERE email = $1',
         [email.toLowerCase()]
       );
-      
+
       if (existingPractice.length > 0) {
         practiceId = existingPractice[0].id;
       } else {
         const { rows: [practice] } = await client.query(
-          `INSERT INTO practices (name, email, subscription_status, referred_by_affiliate_id, referral_code_used) 
+          `INSERT INTO practices (name, email, subscription_status, referred_by_affiliate_id, referral_code_used)
            VALUES ($1, $2, 'trial', $3, $4) RETURNING id`,
       [practiceName, email, referredByAffiliateId, referralCode]
 );
         practiceId = practice.id;
-        
+
         if (referredByAffiliateId) {
           await client.query(
             'UPDATE affiliates SET total_signups = total_signups + 1 WHERE id = $1',
@@ -87,11 +87,11 @@ router.post('/register', async (req, res) => {
       // FIX: Create as clinic user, NOT admin
       const { rows: [user] } = await client.query(
         `INSERT INTO users (
-          practice_id, email, password_hash, name, role, is_admin, 
-          verification_token, verification_token_expires, email_verified
-        ) VALUES ($1, $2, $3, $4, 'clinic', false, $5, $6, false)
-        ON CONFLICT (practice_id, email) DO UPDATE SET 
-          name = $4, 
+          practice_id, email, password_hash, name, role, is_admin,
+          verification_token, verification_token_expires, email_verified, practice_role
+        ) VALUES ($1, $2, $3, $4, 'clinic', false, $5, $6, false, 'owner')
+        ON CONFLICT (practice_id, email) DO UPDATE SET
+          name = $4,
           password_hash = $3,
           role = 'clinic',
           is_admin = false,
@@ -102,7 +102,7 @@ router.post('/register', async (req, res) => {
       );
 
       await client.query('COMMIT');
-      
+
       // Send verification email
       await sendVerificationEmail(email, verificationToken, practiceName);
 
@@ -143,38 +143,38 @@ router.post('/register', async (req, res) => {
 router.get('/verify/:token', async (req, res) => {
   try {
     const { token } = req.params;
-    
+
     const { rows: [user] } = await db.query(
-      `SELECT id, email, verification_token, verification_token_expires 
-       FROM users 
+      `SELECT id, email, verification_token, verification_token_expires
+       FROM users
        WHERE verification_token = $1 AND email_verified = FALSE`,
       [token]
     );
-    
+
     if (!user) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Invalid or expired verification link',
         message: 'Please request a new verification email'
       });
     }
-    
+
     if (new Date() > user.verification_token_expires) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Verification link has expired',
         message: 'Please request a new verification email'
       });
     }
-    
+
     await db.query(
-      `UPDATE users 
-       SET email_verified = TRUE, 
-           email_verified_at = NOW(), 
+      `UPDATE users
+       SET email_verified = TRUE,
+           email_verified_at = NOW(),
            verification_token = NULL,
            verification_token_expires = NULL
        WHERE id = $1`,
       [user.id]
     );
-    
+
     // Redirect to frontend with success
     res.redirect(`${process.env.FRONTEND_URL || 'https://app.dentalappeal.claims'}/login?verified=true`);
   } catch (error) {
@@ -189,11 +189,11 @@ router.get('/verify/:token', async (req, res) => {
 router.post('/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
-    
+
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
-    
+
     const { rows: [user] } = await db.query(
       `SELECT u.id, u.email, u.practice_id, u.email_verified, p.name as practice_name
        FROM users u
@@ -201,32 +201,32 @@ router.post('/resend-verification', async (req, res) => {
        WHERE u.email = $1`,
       [email.toLowerCase()]
     );
-    
+
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    
+
     if (user.email_verified) {
       return res.status(400).json({ error: 'Email already verified' });
     }
-    
+
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const tokenExpiry = new Date();
     tokenExpiry.setHours(tokenExpiry.getHours() + 24);
-    
+
     await db.query(
-      `UPDATE users 
-       SET verification_token = $1, 
-           verification_token_expires = $2 
+      `UPDATE users
+       SET verification_token = $1,
+           verification_token_expires = $2
        WHERE id = $3`,
       [verificationToken, tokenExpiry, user.id]
     );
-    
+
     await sendVerificationEmail(email, verificationToken, user.practice_name || 'DentalAppeal');
-    
-    res.json({ 
+
+    res.json({
       success: true,
-      message: 'Verification email sent successfully' 
+      message: 'Verification email sent successfully'
     });
   } catch (error) {
     console.error('❌ Resend verification error:', error);
@@ -234,8 +234,62 @@ router.post('/resend-verification', async (req, res) => {
   }
 });
 
+// Token and profile returned after a successful sign-in (password alone, or password + code).
+async function sessionFor(userId: number) {
+  const { rows: [user] } = await db.query(
+    `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.email_verified, u.user_type,
+            u.two_factor_enabled, u.practice_role, u.is_dentist, u.practice_id,
+            p.name AS practice_name, p.subscription_status
+     FROM users u LEFT JOIN practices p ON u.practice_id = p.id
+     WHERE u.id = $1`,
+    [userId]
+  );
+  const role = user.is_admin ? 'admin' : (user.role || 'clinic');
+  const token = jwt.sign(
+    {
+      userId: user.id,
+      practiceId: user.practice_id,
+      role,
+      practiceName: user.practice_name || (user.is_admin ? 'Admin' : undefined),
+      isAdmin: user.is_admin || false,
+    },
+    process.env.JWT_SECRET!,
+    { expiresIn: '7d' }
+  );
+  return {
+    token,
+    user: {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role,
+      email_verified: user.email_verified,
+      is_admin: user.is_admin || false,
+      user_type: user.user_type || (user.is_admin ? 'admin' : 'clinic'),
+      two_factor_enabled: user.two_factor_enabled || false,
+      practice_role: user.practice_role,
+      is_dentist: user.is_dentist === true,
+    },
+    practice: user.practice_id ? {
+      id: user.practice_id,
+      name: user.practice_name,
+      subscriptionStatus: user.subscription_status,
+    } : null,
+  };
+}
+
+async function sendSignInCode(user: { id: number; email: string; name: string }) {
+  const code = generateTwoFactorCode();
+  const expiresAt = new Date(Date.now() + 10 * 60_000);
+  await db.query(
+    'UPDATE users SET two_factor_code = $1, two_factor_expires = $2 WHERE id = $3',
+    [code, expiresAt, user.id]
+  );
+  await sendTwoFactorCodeEmail(user.email, code, user.name);
+}
+
 // ============================================
-// LOGIN - With 2FA for Admin Only
+// LOGIN - two-step sign-in for anyone who turned it on (always on for admins)
 // ============================================
 const loginSchema = z.object({
   email: z.string().email(),
@@ -248,21 +302,24 @@ router.post('/login', async (req, res) => {
     const { email, password } = loginSchema.parse(req.body);
 
     const { rows: [user] } = await db.query(
-      `SELECT u.*, p.name as practice_name, p.subscription_status 
-       FROM users u 
-       LEFT JOIN practices p ON u.practice_id = p.id 
-       WHERE u.email = $1`,
+      `SELECT u.*, p.name as practice_name, p.subscription_status
+       FROM users u
+       LEFT JOIN practices p ON u.practice_id = p.id
+       WHERE u.email = $1
+       ORDER BY (u.deleted_at IS NULL) DESC, u.id
+       LIMIT 1`,
       [email.toLowerCase().trim()]
     );
 
-    if (!user) {
-      console.log('❌ User not found:', email);
+    // Removed or deactivated accounts get the same answer as a wrong password.
+    if (!user || user.deleted_at || user.is_active === false) {
+      console.log('❌ User not found or inactive:', email);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // Check if email is verified (skip for admin)
     if (!user.email_verified && !user.is_admin) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Please verify your email before logging in',
         requiresVerification: true,
         email: user.email
@@ -275,65 +332,20 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // ONLY ADMIN gets 2FA
-    if (user.is_admin === true && user.two_factor_enabled === true) {
-      const code = generateTwoFactorCode();
-      const expiresAt = new Date();
-      expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-      
-      await db.query(
-        `UPDATE users 
-         SET two_factor_code = $1, two_factor_expires = $2 
-         WHERE id = $3`,
-        [code, expiresAt, user.id]
-      );
-      
-      await sendTwoFactorCodeEmail(user.email, code, user.name);
-      
+    if (user.two_factor_enabled === true) {
+      await sendSignInCode(user);
       console.log(`✅ 2FA code sent to ${user.email}`);
-      
       return res.json({
         requiresTwoFactor: true,
         userId: user.id,
         email: user.email,
-        is_admin: true,
+        is_admin: user.is_admin === true,
         message: 'A verification code has been sent to your email.'
       });
     }
 
-    // Regular login (clinic users or admin with 2FA disabled)
-    const token = jwt.sign(
-      { 
-        userId: user.id, 
-        practiceId: user.practice_id, 
-        role: user.role || 'clinic',
-        practiceName: user.practice_name,
-        isAdmin: user.is_admin || false
-      },
-      process.env.JWT_SECRET!,
-      { expiresIn: '7d' }
-    );
-
     console.log('✅ LOGIN SUCCESS for:', email);
-
-    res.json({
-      token,
-      user: { 
-        id: user.id, 
-        email: user.email, 
-        name: user.name, 
-        role: user.role || 'clinic',
-        email_verified: user.email_verified,
-        is_admin: user.is_admin || false,
-        user_type: user.user_type || (user.is_admin ? 'admin' : 'clinic'),
-        two_factor_enabled: user.two_factor_enabled || false
-      },
-      practice: user.practice_id ? {
-        id: user.practice_id,
-        name: user.practice_name,
-        subscriptionStatus: user.subscription_status,
-      } : null,
-    });
+    res.json(await sessionFor(user.id));
   } catch (error) {
     console.error('❌ Login error:', error);
     if (error instanceof z.ZodError) {
@@ -344,79 +356,42 @@ router.post('/login', async (req, res) => {
 });
 
 // ============================================
-// VERIFY 2FA - Admin only
+// VERIFY 2FA - second step of sign-in
 // ============================================
 router.post('/verify-2fa', async (req, res) => {
   try {
     const { userId, code } = req.body;
-    
+
     if (!userId || !code) {
       return res.status(400).json({ error: 'User ID and code are required' });
     }
-    
+
     const { rows: [user] } = await db.query(
-      `SELECT id, email, name, two_factor_code, two_factor_expires, practice_id, is_admin, two_factor_enabled
-       FROM users 
-       WHERE id = $1 AND is_admin = true AND two_factor_enabled = true`,
+      `SELECT id, two_factor_code, two_factor_expires
+       FROM users
+       WHERE id = $1 AND two_factor_enabled = true AND deleted_at IS NULL AND is_active IS NOT FALSE`,
       [userId]
     );
-    
+
     if (!user) {
-      return res.status(404).json({ error: 'Admin user not found or 2FA not enabled' });
+      return res.status(404).json({ error: 'Verification is not available for this account' });
     }
-    
+
     if (!user.two_factor_code || new Date() > user.two_factor_expires) {
       return res.status(400).json({ error: 'Verification code expired. Please request a new one.' });
     }
-    
-    if (user.two_factor_code !== code) {
+
+    if (user.two_factor_code !== String(code).trim()) {
       return res.status(400).json({ error: 'Invalid verification code' });
     }
-    
-    // Clear the code
+
+    // A code works once.
     await db.query(
-      `UPDATE users 
-       SET two_factor_code = NULL, two_factor_expires = NULL 
-       WHERE id = $1`,
+      'UPDATE users SET two_factor_code = NULL, two_factor_expires = NULL WHERE id = $1',
       [userId]
     );
-    
-    // Get practice info
-    const { rows: [practice] } = await db.query(
-      'SELECT name, subscription_status FROM practices WHERE id = $1',
-      [user.practice_id]
-    );
-    
-    // Generate token
-    const token = jwt.sign(
-      { 
-        userId: user.id, 
-        practiceId: user.practice_id, 
-        role: 'admin',
-        practiceName: practice?.name || 'Admin',
-        isAdmin: true
-      },
-      process.env.JWT_SECRET!,
-      { expiresIn: '7d' }
-    );
-    
-    res.json({
-      success: true,
-      token,
-      user: { 
-        id: user.id, 
-        email: user.email, 
-        name: user.name, 
-        role: 'admin',
-        is_admin: true,
-        two_factor_enabled: user.two_factor_enabled
-      },
-      practice: practice ? {
-        id: user.practice_id,
-        name: practice.name,
-        subscriptionStatus: practice.subscription_status,
-      } : null,
-    });
+
+    res.json({ success: true, ...(await sessionFor(user.id)) });
   } catch (error) {
     console.error('❌ 2FA verification error:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -424,41 +399,30 @@ router.post('/verify-2fa', async (req, res) => {
 });
 
 // ============================================
-// RESEND 2FA CODE - Admin only
+// RESEND 2FA CODE
 // ============================================
 router.post('/resend-2fa', async (req, res) => {
   try {
     const { userId } = req.body;
-    
+
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
-    
+
     const { rows: [user] } = await db.query(
-      'SELECT id, email, name FROM users WHERE id = $1 AND is_admin = true AND two_factor_enabled = true',
+      `SELECT id, email, name FROM users
+       WHERE id = $1 AND two_factor_enabled = true AND deleted_at IS NULL AND is_active IS NOT FALSE`,
       [userId]
     );
-    
+
     if (!user) {
-      return res.status(404).json({ error: 'Admin user not found or 2FA not enabled' });
+      return res.status(404).json({ error: 'Verification is not available for this account' });
     }
-    
-    const code = generateTwoFactorCode();
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 10);
-    
-    await db.query(
-      `UPDATE users 
-       SET two_factor_code = $1, two_factor_expires = $2 
-       WHERE id = $3`,
-      [code, expiresAt, user.id]
-    );
-    
-    await sendTwoFactorCodeEmail(user.email, code, user.name);
-    
-    res.json({ 
+
+    await sendSignInCode(user);
+    res.json({
       success: true,
-      message: 'A new verification code has been sent to your email.' 
+      message: 'A new verification code has been sent to your email.'
     });
   } catch (error) {
     console.error('❌ Resend 2FA error:', error);
@@ -481,15 +445,16 @@ router.get('/me', async (req, res) => {
 
     const { rows: [user] } = await db.query(
       `SELECT u.id, u.email, u.name, u.role, u.is_admin, u.email_verified, u.user_type, u.two_factor_enabled,
-              p.id as practice_id, p.name as practice_name, p.subscription_status 
-       FROM users u 
-       LEFT JOIN practices p ON u.practice_id = p.id 
-       WHERE u.id = $1`,
+              u.practice_role, u.is_dentist,
+              p.id as practice_id, p.name as practice_name, p.subscription_status
+       FROM users u
+       LEFT JOIN practices p ON u.practice_id = p.id
+       WHERE u.id = $1 AND u.deleted_at IS NULL AND u.is_active IS NOT FALSE`,
       [decoded.userId]
     );
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      return res.status(401).json({ error: 'Invalid or expired session' });
     }
 
     // Get affiliate data if user is an affiliate
@@ -498,7 +463,7 @@ router.get('/me', async (req, res) => {
       const { rows: [affiliate] } = await db.query(
         `SELECT affiliate_code, is_active, approved_at, commission_rate, tier,
                 total_clicks, total_signups, total_conversions, total_earnings, pending_earnings
-         FROM affiliates 
+         FROM affiliates
          WHERE user_id = $1`,
         [user.id]
       );
@@ -515,6 +480,8 @@ router.get('/me', async (req, res) => {
         email_verified: user.email_verified,
         user_type: user.user_type || (user.is_admin ? 'admin' : 'clinic'),
         two_factor_enabled: user.two_factor_enabled || false,
+        practice_role: user.practice_role,
+        is_dentist: user.is_dentist === true,
         affiliate: affiliateData ? {
           code: affiliateData.affiliate_code,
           is_active: affiliateData.is_active,
@@ -552,38 +519,38 @@ router.get('/me', async (req, res) => {
 router.post('/forgot-password', async (req, res) => {
   try {
     const { email } = req.body;
-    
+
     if (!email) {
       return res.status(400).json({ error: 'Email is required' });
     }
-    
+
     const { rows: users } = await db.query(
       'SELECT id, email, name FROM users WHERE email = $1',
       [email.toLowerCase()]
     );
-    
+
     if (users.length === 0) {
-      return res.json({ 
+      return res.json({
         success: true,
-        message: 'If an account exists, a reset link has been sent' 
+        message: 'If an account exists, a reset link has been sent'
       });
     }
-    
+
     const user = users[0];
     const resetToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
     const tokenExpiry = Date.now() + 60 * 60 * 1000;
-    
+
     await db.query(
       'UPDATE users SET reset_password_token = $1, reset_password_expires = $2 WHERE id = $3',
       [hashedToken, tokenExpiry, user.id]
     );
-    
+
     await sendPasswordResetEmail(email, resetToken, user.name);
-    
-    res.json({ 
+
+    res.json({
       success: true,
-      message: 'If an account exists, a reset link has been sent' 
+      message: 'If an account exists, a reset link has been sent'
     });
   } catch (error) {
     console.error('❌ Forgot password error:', error);
@@ -598,33 +565,33 @@ router.post('/reset-password/:token', async (req, res) => {
   try {
     const { token } = req.params;
     const { password } = req.body;
-    
+
     if (!password || password.length < 6) {
       return res.status(400).json({ error: 'Password must be at least 6 characters' });
     }
-    
+
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-    
+
     const { rows: users } = await db.query(
       'SELECT id FROM users WHERE reset_password_token = $1 AND reset_password_expires > $2',
       [hashedToken, Date.now()]
     );
-    
+
     if (users.length === 0) {
       return res.status(400).json({ error: 'Invalid or expired token' });
     }
-    
+
     const user = users[0];
     const hashedPassword = await bcrypt.hash(password, 10);
-    
+
     await db.query(
       'UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL WHERE id = $2',
       [hashedPassword, user.id]
     );
-    
-    res.json({ 
+
+    res.json({
       success: true,
-      message: 'Password has been reset successfully' 
+      message: 'Password has been reset successfully'
     });
   } catch (error) {
     console.error('❌ Reset password error:', error);

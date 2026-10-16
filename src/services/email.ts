@@ -568,3 +568,31 @@ export const sendAppealReminderEmail = async (
   `;
   return sendEmail({ to: email, subject, html });
 };
+
+// ============================================
+// TEAM INVITATION
+// ============================================
+export const sendTeamInviteEmail = async (
+  email: string,
+  inviterName: string,
+  practiceName: string,
+  roleLabel: string,
+  link: string
+) => {
+  const html = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+      <div style="background-color: #2563eb; padding: 20px; text-align: center;">
+        <h1 style="color: white; margin: 0;">DentalAppeal</h1>
+      </div>
+      <div style="padding: 20px; border: 1px solid #e2e8f0; border-top: none;">
+        <p>${escapeHtml(inviterName)} invited you to join <strong>${escapeHtml(practiceName)}</strong> on DentalAppeal as <strong>${escapeHtml(roleLabel)}</strong>.</p>
+        <p>DentalAppeal helps your office appeal denied dental insurance claims.</p>
+        <p style="margin: 24px 0;">
+          <a href="${link}" style="background-color: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Accept invitation</a>
+        </p>
+        <p style="color: #64748b; font-size: 13px;">This link works once and expires in 7 days. If you weren't expecting it, you can ignore this email.</p>
+      </div>
+    </div>
+  `;
+  return sendEmail({ to: email, subject: `You're invited to ${practiceName} on DentalAppeal`, html });
+};

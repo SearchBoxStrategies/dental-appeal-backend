@@ -25,7 +25,7 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, aiLim
 
     // Fetch practice profile
     const { rows: [practice] } = await db.query(
-      `SELECT 
+      `SELECT
          name, address, city, state, zip, phone, fax, website, email,
          npi_number, tax_id, provider_name, provider_license
        FROM practices WHERE id = $1`,
@@ -85,7 +85,8 @@ router.post('/generate/:claimId', authenticate, requireActiveSubscription, aiLim
         email: practice?.email,
         npi_number: practice?.npi_number,
         tax_id: practice?.tax_id,
-        provider_name: practice?.provider_name,
+        // The dentist who approved the clinical note signs the letter; otherwise the profile's dentist.
+        provider_name: (claim.dentist_note_approved_at && claim.dentist_note_approved_by) || practice?.provider_name,
         provider_license: practice?.provider_license,
         insuranceCompany: insuranceCompany || null,
       }

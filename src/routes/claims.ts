@@ -233,11 +233,11 @@ router.patch('/:id/status', authenticate, async (req, res) => {
        RETURNING *`,
       [status, claimId, practiceId, recovers, amountRecovered ?? null, resolves, sent, notSent]
     );
-    
+
     if (!claim) {
       return res.status(404).json({ error: 'Claim not found' });
     }
-    
+
     res.json(claim);
   } catch (error) {
     console.error(error);
@@ -249,20 +249,20 @@ router.patch('/:id/status', authenticate, async (req, res) => {
 router.post('/:id/validate', authenticate, async (req, res) => {
   try {
     const claimId = parseInt(req.params.id);
-    
+
     // Verify claim belongs to user
     const { rows: [claim] } = await db.query(
       'SELECT * FROM claims WHERE id = $1 AND practice_id = $2',
       [claimId, req.user!.practiceId]
     );
-    
+
     if (!claim) {
       return res.status(404).json({ error: 'Claim not found' });
     }
-    
+
     const validation = await validateClaim(claim, claimId);
     const summary = await getValidationSummary(claimId);
-    
+
     res.json({ validation, summary });
   } catch (error) {
     console.error('Validation error:', error);
@@ -295,7 +295,7 @@ router.post('/', authenticate, async (req, res) => {
     const { rows: [claim] } = await db.query(
       `INSERT INTO claims (
          practice_id, created_by, patient_name, patient_dob, insurance_company,
-         insurance_company_id, policy_number, claim_number, procedure_codes, 
+         insurance_company_id, policy_number, claim_number, procedure_codes,
          denial_reason, service_date, amount_claimed, amount_denied,
          denial_date, insurer_appeals_address, appeal_deadline
        ) VALUES (
@@ -404,7 +404,7 @@ router.post('/:id/dentist-note/draft', authenticate, requireActiveSubscription, 
     });
     const { rows: [updated] } = await db.query(
       `UPDATE claims SET dentist_note = $1, dentist_note_approved_at = NULL,
-              dentist_note_approved_by = NULL, updated_at = NOW()
+              dentist_note_approved_by = NULL, dentist_note_approved_by_user_id = NULL, updated_at = NOW()
        WHERE id = $2 AND practice_id = $3 RETURNING *`,
       [note, claim.id, req.user!.practiceId]
     );
@@ -418,19 +418,19 @@ router.post('/:id/dentist-note/draft', authenticate, requireActiveSubscription, 
 
 const dentistNoteSchema = z.object({
   note: z.string().trim().min(1).max(10000),
-  // Approving requires the dentist's name, which is recorded as the sign-off.
+  // Approving is limited to team members marked as dentists; their account is the sign-off.
   approve: z.boolean().optional(),
-  approverName: z.string().trim().min(2).max(255).optional(),
 });
 
 router.put('/:id/dentist-note', authenticate, async (req, res) => {
   try {
     const parsed = dentistNoteSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Note text is required' });
-    const { note, approve, approverName } = parsed.data;
-    if (approve && !approverName) {
-      return res.status(400).json({ error: "Enter the dentist's name to approve the note" });
+    const { note, approve } = parsed.data;
+    if (approve && !req.user!.isDentist) {
+      return res.status(403).json({ error: 'Only a dentist on your team can approve the clinical note.' });
     }
+    const approverName = req.user!.name || req.user!.email;
     if (approve && /\[[^\]]+\]/.test(note)) {
       return res.status(400).json({ error: 'Fill in or remove every [bracketed] placeholder before approving' });
     }
@@ -440,9 +440,10 @@ router.put('/:id/dentist-note', authenticate, async (req, res) => {
        SET dentist_note = $1,
            dentist_note_approved_at = CASE WHEN $2::boolean THEN NOW() ELSE NULL END,
            dentist_note_approved_by = CASE WHEN $2::boolean THEN $3::varchar ELSE NULL END,
+           dentist_note_approved_by_user_id = CASE WHEN $2::boolean THEN $6::int ELSE NULL END,
            updated_at = NOW()
        WHERE id = $4 AND practice_id = $5 RETURNING *`,
-      [note, !!approve, approverName ?? null, req.params.id, req.user!.practiceId]
+      [note, !!approve, approverName, req.params.id, req.user!.practiceId, req.user!.userId]
     );
     if (!claim) return res.status(404).json({ error: 'Claim not found' });
     res.json(workflowView(claim));

@@ -22,11 +22,13 @@ import insuranceRouter from './routes/insurance';
 import affiliateRouter from './routes/affiliate';
 import adminEmailTemplatesRouter from './routes/adminEmailTemplates';
 import calculatorRouter from './routes/calculator';
+import teamRouter from './routes/team';
+import { checkStorage } from './services/fileStorage';
 import { scheduleAppealReminders } from './jobs/appealReminders';
 import { scheduleHeartbeat, touchHeartbeat } from './jobs/heartbeat';
 import {
   apiLimiter, authLimiter, loginPerAccountLimiter, twoFactorLimiter,
-  emailFormLimiter, emailRecipientLimiter, trackLimiter,
+  emailFormLimiter, emailRecipientLimiter, trackLimiter, rateLimit,
 } from './middleware/rateLimit';
 
 const app = express();
@@ -64,6 +66,10 @@ app.post('/api/auth/login', loginPerAccountLimiter);
 app.post(['/api/auth/verify-2fa', '/api/auth/resend-2fa'], twoFactorLimiter);
 app.post('/api/calculator/send-report', emailFormLimiter, emailRecipientLimiter);
 app.get('/api/affiliate/track/:code', trackLimiter);
+// Invitation links: looking up and accepting are public, so limit guessing; sending invites
+// emails people, so limit that too.
+app.use('/api/team/invites/accept', authLimiter);
+app.post('/api/team/invites', rateLimit({ name: 'team-invite', windowMs: 60 * 60_000, max: 20 }));
 
 // Register all API routes
 app.use('/api/auth', authRouter);
@@ -78,6 +84,7 @@ app.use('/api/admin', adminRouter);
 app.use('/api/bulk', bulkUploadRouter);
 app.use('/api/practice', practiceRouter);
 app.use('/api/insurance', insuranceRouter);
+app.use('/api/team', teamRouter);
 app.use('/api/affiliate', affiliateRouter);
 app.use('/api', adminEmailTemplatesRouter);
 app.use('/api', calculatorRouter);
@@ -89,7 +96,8 @@ app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
 app.get('/api/health/db', async (_req, res) => {
   try {
     const at = await touchHeartbeat('external');
-    res.json({ status: 'ok', db: 'ok', at });
+    const storage = (await checkStorage()) ? 'ok' : 'unavailable';
+    res.status(storage === 'ok' ? 200 : 503).json({ status: storage === 'ok' ? 'ok' : 'error', db: 'ok', storage, at });
   } catch (error) {
     console.error('DB health check failed:', error);
     res.status(503).json({ status: 'error', db: 'unreachable' });
