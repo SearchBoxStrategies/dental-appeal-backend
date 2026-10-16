@@ -1,12 +1,11 @@
 import express, { Request, Response } from 'express';
 import Stripe from 'stripe';
+import { stripeOptions } from '../services/stripeOptions';
 import { PoolClient } from 'pg';
 import { getAffiliateTier, getAffiliateTierByPractice, updateAffiliateTierColumn } from '../utils/affiliateTiers';
 
 const router = express.Router();
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, stripeOptions());
 
 const roundCents = (n: number) => Math.round(n * 100) / 100;
 
@@ -65,13 +64,27 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
 
     await client.query('BEGIN');
 
+    // Already converted (Stripe can send the checkout event more than once): later payments are
+    // handled by the recurring commission, so stop here.
+    const { rows: [alreadyConverted] } = await client.query(
+      `SELECT id FROM affiliate_referrals WHERE practice_id = $1 AND converted_at IS NOT NULL LIMIT 1`,
+      [practiceId]
+    );
+    if (alreadyConverted) {
+      await client.query('ROLLBACK');
+      return;
+    }
+
+    // The clinic's own referral (linked at sign-up). Older sign-ups were not linked, so fall back
+    // to an unclaimed record for the code.
     const { rows: [referral] } = await client.query(
       `SELECT id
        FROM affiliate_referrals
-       WHERE referral_code = $1 AND practice_id IS NULL
+       WHERE practice_id = $1 OR (practice_id IS NULL AND referral_code = $2)
+       ORDER BY (practice_id IS NOT NULL) DESC, id
        LIMIT 1
        FOR UPDATE`,
-      [practice.referral_code_used]
+      [practiceId, practice.referral_code_used]
     );
 
     if (!referral) {
@@ -319,10 +332,10 @@ async function reverseCommissionForRefund(charge: Stripe.Charge) {
 async function updatePracticeStatus(customerId: string, status: string, subscriptionId?: string) {
   try {
     const { db } = await import('../db');
-    
+
     let query = `UPDATE practices SET subscription_status = $1`;
     const params: any[] = [status];
-    
+
     if (subscriptionId) {
       query += `, stripe_subscription_id = $2`;
       params.push(subscriptionId);
@@ -332,10 +345,10 @@ async function updatePracticeStatus(customerId: string, status: string, subscrip
       query += ` WHERE stripe_customer_id = $2`;
       params.push(customerId);
     }
-    
+
     await db.query(query, params);
     console.log(`✅ Updated practice status to '${status}' for customer ${customerId}`);
-    
+
   } catch (error) {
     console.error('❌ Failed to update practice status:', error);
   }
@@ -344,23 +357,23 @@ async function updatePracticeStatus(customerId: string, status: string, subscrip
 router.post('/', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
   const sig = req.headers['stripe-signature'] as string;
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
-  
+
   if (!webhookSecret) {
     console.error('❌ STRIPE_WEBHOOK_SECRET is not set');
     return res.status(500).json({ error: 'Webhook secret not configured' });
   }
-  
+
   let event: Stripe.Event;
-  
+
   try {
     event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
   } catch (err: any) {
     console.error(`⚠️ Webhook signature verification failed: ${err.message}`);
     return res.status(401).json({ error: 'Webhook signature verification failed' });
   }
-  
+
   console.log(`📨 Received webhook event: ${event.type}`);
-  
+
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object as Stripe.Checkout.Session;
@@ -369,25 +382,25 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       console.log(`   PracticeId: ${session.metadata?.practiceId}`);
       console.log(`   ReferralCode: ${session.metadata?.referralCode}`);
       console.log(`   Customer: ${session.customer}`);
-      
+
       const amountTotal = session.amount_total;
       if (!amountTotal) {
         console.error('❌ No amount_total in checkout session');
         break;
       }
-      
+
       try {
         const { db } = await import('../db');
-        
+
         const referralCode = session.metadata?.referralCode;
         const practiceId = session.metadata?.practiceId;
-        
+
         if (referralCode && practiceId) {
           await db.query(
-            `UPDATE practices 
+            `UPDATE practices
              SET referral_code_used = $1,
                  referred_by_affiliate_id = (
-                   SELECT affiliate_id FROM affiliate_referrals 
+                   SELECT affiliate_id FROM affiliate_referrals
                    WHERE referral_code = $3 LIMIT 1
                  )
              WHERE id = $2`,
@@ -397,36 +410,36 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
           );
           console.log(`✅ Updated practice ${practiceId} with referral code ${referralCode}`);
         }
-        
+
         await db.query(
-          `UPDATE practices 
-           SET subscription_status = 'active', 
+          `UPDATE practices
+           SET subscription_status = 'active',
                stripe_customer_id = $1,
                stripe_subscription_id = $2
            WHERE id = $3`,
           [session.customer, session.subscription, session.metadata?.practiceId]
         );
         console.log(`✅ Updated practice ${session.metadata?.practiceId} to active`);
-        
+
         await createAffiliateCommission(
           parseInt(session.metadata?.practiceId),
           session.subscription as string,
           amountTotal,
           typeof session.invoice === 'string' ? session.invoice : session.invoice?.id ?? null
         );
-        
+
       } catch (dbError) {
         console.error('❌ Database update failed:', dbError);
       }
       break;
     }
-      
+
     case 'invoice.payment_succeeded': {
       const invoice = event.data.object as Stripe.Invoice;
       console.log(`💰 Payment succeeded for invoice: ${invoice.id}`);
       console.log(`   Customer: ${invoice.customer}`);
       console.log(`   Amount: $${(invoice.amount_paid / 100).toFixed(2)}`);
-      
+
       // Revenue: every paid invoice, the first one included.
       if (invoice.customer && invoice.amount_paid > 0) {
         try {
@@ -444,19 +457,19 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       if (invoice.subscription && invoice.customer) {
         try {
           const { db } = await import('../db');
-          
+
           const { rows: [practice] } = await db.query(
             'SELECT id FROM practices WHERE stripe_customer_id = $1',
             [invoice.customer]
           );
-          
+
           if (practice) {
             const { rows: [existingReferral] } = await db.query(
-              `SELECT id FROM affiliate_referrals 
+              `SELECT id FROM affiliate_referrals
                WHERE practice_id = $1`,
               [practice.id]
             );
-            
+
             if (existingReferral) {
               await createRecurringAffiliateCommission(practice.id, invoice);
             } else {
@@ -469,7 +482,7 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       }
       break;
     }
-      
+
     case 'customer.subscription.deleted': {
       const subscription = event.data.object as Stripe.Subscription;
       console.log(`❌ Subscription cancelled: ${subscription.id}`);
@@ -480,12 +493,12 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       }
       break;
     }
-      
+
     case 'customer.subscription.updated': {
       const updatedSubscription = event.data.object as Stripe.Subscription;
       console.log(`📝 Subscription updated: ${updatedSubscription.id}`);
       console.log(`   Status: ${updatedSubscription.status}`);
-      
+
       if (updatedSubscription.status === 'past_due') {
         await updatePracticeStatus(updatedSubscription.customer as string, 'past_due');
       } else if (updatedSubscription.status === 'active') {
@@ -493,7 +506,7 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       }
       break;
     }
-      
+
     case 'invoice.payment_failed': {
       const failedInvoice = event.data.object as Stripe.Invoice;
       console.log(`⚠️ Payment failed for invoice: ${failedInvoice.id}`);
@@ -502,7 +515,7 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
       }
       break;
     }
-    
+
     case 'charge.refunded': {
       const charge = event.data.object as Stripe.Charge;
       console.log(`↩️ Charge refunded: ${charge.id} ($${(charge.amount_refunded / 100).toFixed(2)} of $${(charge.amount / 100).toFixed(2)})`);
@@ -518,29 +531,29 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
     case 'account.updated': {
       const account = event.data.object as Stripe.Account;
       const affiliateId = account.metadata?.affiliateId;
-      
+
       if (affiliateId) {
         const { db } = await import('../db');
         const isActive = account.charges_enabled && account.payouts_enabled;
-        
+
         await db.query(
-          `UPDATE affiliates 
+          `UPDATE affiliates
            SET stripe_account_status = $1,
                auto_payout_enabled = CASE WHEN $2 AND stripe_onboarded_at IS NULL THEN true ELSE auto_payout_enabled END,
                stripe_onboarded_at = CASE WHEN $2 AND stripe_onboarded_at IS NULL THEN NOW() ELSE stripe_onboarded_at END
            WHERE id = $3`,
           [isActive ? 'verified' : 'pending', isActive, affiliateId]
         );
-        
+
         console.log(`✅ Updated affiliate ${affiliateId} Connect status to ${isActive ? 'verified' : 'pending'}`);
       }
       break;
     }
-      
+
     default:
       console.log(`❓ Unhandled event type: ${event.type}`);
   }
-  
+
   res.json({ received: true });
 });
 

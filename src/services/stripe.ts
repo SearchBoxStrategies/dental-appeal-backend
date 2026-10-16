@@ -1,8 +1,7 @@
 import Stripe from 'stripe';
+import { stripeOptions } from './stripeOptions';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
-});
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, stripeOptions());
 
 export interface CreateCheckoutSessionParams {
   customerId?: string;

@@ -206,3 +206,26 @@ export async function processAutoPayouts() {
 if (require.main === module) {
   processAutoPayouts().then(() => process.exit(0));
 }
+
+// Monthly payouts, run by the API itself: on the 15th (UTC), or the first check after it if the
+// server was down that day. The job_runs row makes it happen once per month, across restarts.
+export async function runMonthlyPayoutsIfDue(now: Date = new Date()): Promise<boolean> {
+  if (now.getUTCDate() < 15) return false;
+  const period = now.toISOString().slice(0, 7); // e.g. 2026-11
+  const { rows } = await db.query(
+    `INSERT INTO job_runs (job, period) VALUES ('affiliate-payouts', $1)
+     ON CONFLICT (job, period) DO NOTHING RETURNING job`,
+    [period]
+  );
+  if (rows.length === 0) return false; // already ran this month
+  console.log(`📅 Monthly affiliate payouts for ${period}`);
+  await processAutoPayouts();
+  return true;
+}
+
+export function schedulePayouts() {
+  if (process.env.AUTO_PAYOUTS === 'off') return;
+  const tick = () => runMonthlyPayoutsIfDue().catch((err) => console.error('Monthly payouts failed:', err));
+  setTimeout(tick, 2 * 60_000).unref();
+  setInterval(tick, 60 * 60_000).unref();
+}

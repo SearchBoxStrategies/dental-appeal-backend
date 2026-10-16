@@ -21,15 +21,15 @@ const checkAffiliateApproval = async (userId: number) => {
     'SELECT is_active, stripe_account_id FROM affiliates WHERE user_id = $1',
     [userId]
   );
-  
+
   if (!affiliate) {
     throw new Error('Affiliate not found');
   }
-  
+
   if (!affiliate.is_active) {
     throw new Error('Your affiliate account is pending admin approval. You will be notified once approved.');
   }
-  
+
   return affiliate;
 };
 
@@ -67,7 +67,7 @@ router.post('/signup', async (req, res) => {
 
       if (existingAffiliate.rows.length > 0) {
         const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existingAffiliate.rows[0].affiliate_code}`;
-        
+
         if (!existingAffiliate.rows[0].is_active) {
           return res.json({
             success: true,
@@ -78,7 +78,7 @@ router.post('/signup', async (req, res) => {
             message: 'You are already registered but your account is pending admin approval.'
           });
         }
-        
+
         return res.json({
           success: true,
           alreadyExists: true,
@@ -88,14 +88,14 @@ router.post('/signup', async (req, res) => {
           message: 'You are already registered as an affiliate!'
         });
       }
-      
+
       userId = existingUser.rows[0].id;
     } else {
       // Create new user (no password - they'll set it via email verification)
       const verificationToken = crypto.randomBytes(32).toString('hex');
       const tokenExpiry = new Date();
       tokenExpiry.setHours(tokenExpiry.getHours() + 24);
-      
+
       const userResult = await db.query(
         `INSERT INTO users (email, name, user_type, is_admin, verification_token, verification_token_expires, email_verified, created_at)
          VALUES ($1, $2, 'affiliate', false, $3, $4, false, NOW())
@@ -103,7 +103,7 @@ router.post('/signup', async (req, res) => {
         [email, fullName, verificationToken, tokenExpiry]
       );
       userId = userResult.rows[0].id;
-      
+
       // Send verification email
       const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
       console.log(`📧 Attempting to send verification email to ${email}`);
@@ -136,7 +136,7 @@ router.post('/signup', async (req, res) => {
 
     // Create new affiliate record
     const affiliateCode = generateAffiliateCode(email);
-    
+
     const result = await db.query(
       `INSERT INTO affiliates (user_id, full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
@@ -164,26 +164,26 @@ router.post('/signup', async (req, res) => {
 router.get('/verify', async (req, res) => {
   try {
     const { token } = req.query;
-    
+
     if (!token || typeof token !== 'string') {
       return res.status(400).json({ error: 'Invalid verification token' });
     }
-    
+
     const { rows: [user] } = await db.query(
       `SELECT id, email, name, verification_token, verification_token_expires, email_verified
-       FROM users 
+       FROM users
        WHERE verification_token = $1 AND user_type = 'affiliate' AND email_verified = false`,
       [token]
     );
-    
+
     if (!user) {
       return res.redirect(`${process.env.FRONTEND_URL}/affiliate/verify?error=invalid`);
     }
-    
+
     if (new Date() > user.verification_token_expires) {
       return res.redirect(`${process.env.FRONTEND_URL}/affiliate/verify?error=expired`);
     }
-    
+
     // Mark email as verified and issue a one-time setup token (valid 1 hour) that the
     // set-password step must present, so knowing the email alone can't claim the account.
     const setupToken = crypto.randomBytes(32).toString('hex');
@@ -236,7 +236,7 @@ router.post('/set-password', async (req, res) => {
     if (result.rows.length === 0) {
       return res.status(400).json({ error: 'This setup link is invalid or expired, or the password is already set. Request a new verification email.' });
     }
-    
+
     res.json({ success: true, message: 'Password set successfully. You can now log in.' });
   } catch (error) {
     console.error('Set password error:', error);
@@ -248,7 +248,7 @@ router.post('/set-password', async (req, res) => {
 router.post('/resend-verification', async (req, res) => {
   try {
     const { email } = req.body;
-    
+
     const { rows: [user] } = await db.query(
       `SELECT id, email, name, email_verified, user_type,
               (password_hash IS NULL OR password_hash = '') AS needs_password
@@ -276,7 +276,7 @@ router.post('/resend-verification', async (req, res) => {
        WHERE id = $3`,
       [verificationToken, tokenExpiry, user.id]
     );
-    
+
     const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
     console.log(`📧 Resending verification email to ${user.email}`);
     try {
@@ -285,7 +285,7 @@ router.post('/resend-verification', async (req, res) => {
     } catch (error) {
       console.error(`❌ Failed to resend verification email to ${user.email}:`, error);
     }
-    
+
     res.json({ success: true, message: 'Verification email resent' });
   } catch (error) {
     console.error('Resend verification error:', error);
@@ -338,7 +338,7 @@ router.get('/stats/:code', async (req, res) => {
   try {
     const affiliate = await db.query(
       `SELECT affiliate_code, total_clicks, total_signups, total_conversions, commission_rate, is_active
-       FROM affiliates 
+       FROM affiliates
        WHERE affiliate_code = $1`,
       [code]
     );
@@ -361,9 +361,9 @@ router.get('/stats/:code', async (req, res) => {
 router.get('/public-stats/:code', async (req, res) => {
   try {
     const { code } = req.params;
-    
+
     const { rows: [affiliate] } = await db.query(
-      `SELECT 
+      `SELECT
          affiliate_code,
          full_name,
          total_clicks,
@@ -373,7 +373,7 @@ router.get('/public-stats/:code', async (req, res) => {
          tier,
          created_at,
          is_active
-       FROM affiliates 
+       FROM affiliates
        WHERE affiliate_code = $1`,
       [code]
     );
@@ -388,7 +388,7 @@ router.get('/public-stats/:code', async (req, res) => {
 
     const AVG_SUBSCRIPTION_PRICE = 199;
     const estimatedEarnings = (affiliate.total_conversions || 0) * (affiliate.commission_rate / 100) * AVG_SUBSCRIPTION_PRICE;
-    
+
     const memberSince = new Date(affiliate.created_at).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long'
@@ -403,7 +403,7 @@ router.get('/public-stats/:code', async (req, res) => {
         clicks: affiliate.total_clicks || 0,
         signups: affiliate.total_signups || 0,
         conversions: affiliate.total_conversions || 0,
-        commissionRate: affiliate.commission_rate || 15,
+        commissionRate: affiliate.commission_rate || 20,
         tier: affiliate.tier || 'standard',
         estimatedEarnings: Math.round(estimatedEarnings),
         joinLink: `${process.env.FRONTEND_URL}/register?ref=${affiliate.affiliate_code}`
@@ -422,20 +422,20 @@ router.get('/public-stats/:code', async (req, res) => {
 router.get('/dashboard', authenticate, async (req: Request, res) => {
   try {
     const userId = req.user!.userId;
-    
+
     const { rows: [affiliate] } = await db.query(
-      `SELECT id, affiliate_code, tier, commission_rate, total_clicks, total_signups, 
-              total_conversions, total_earnings, pending_earnings, paid_earnings, 
-              payout_email, payout_method, created_at, stripe_account_id, stripe_account_status, 
+      `SELECT id, affiliate_code, tier, commission_rate, total_clicks, total_signups,
+              total_conversions, total_earnings, pending_earnings, paid_earnings,
+              payout_email, payout_method, created_at, stripe_account_id, stripe_account_status,
               auto_payout_enabled, is_active, approved_at
        FROM affiliates WHERE user_id = $1`,
       [userId]
     );
-    
+
     if (!affiliate) {
       return res.status(404).json({ error: 'Affiliate not found' });
     }
-    
+
     if (!affiliate.is_active) {
       return res.json({
         pendingApproval: true,
@@ -448,10 +448,10 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
         monthlyEarnings: []
       });
     }
-    
+
     // Get next tier info
     const nextTier = await getNextTierInfo(affiliate.id);
-    
+
     const { rows: referrals } = await db.query(
       `SELECT ar.id, ar.referral_code, ar.status, ar.clicked_at, ar.signed_up_at, ar.converted_at,
               ar.practice_id, p.name AS practice_name, p.subscription_status
@@ -462,21 +462,21 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
        LIMIT 50`,
       [affiliate.id]
     );
-    
+
     const { rows: commissions } = await db.query(
       `SELECT ac.id, ac.amount, ac.period_start, ac.period_end, ac.status, ac.paid_at, ac.created_at,
               p.name as practice_name
        FROM affiliate_commissions ac
        JOIN affiliate_referrals ar ON ac.referral_id = ar.id
        LEFT JOIN practices p ON ar.practice_id = p.id
-       WHERE ar.affiliate_id = $1 
-       ORDER BY ac.created_at DESC 
+       WHERE ar.affiliate_id = $1
+       ORDER BY ac.created_at DESC
        LIMIT 50`,
       [affiliate.id]
     );
-    
+
     const { rows: monthlyEarnings } = await db.query(
-      `SELECT DATE_TRUNC('month', ac.created_at) as month, 
+      `SELECT DATE_TRUNC('month', ac.created_at) as month,
               SUM(ac.amount) as total,
               COUNT(ac.id) as commission_count
        FROM affiliate_commissions ac
@@ -487,7 +487,7 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
        LIMIT 12`,
       [affiliate.id]
     );
-    
+
     res.json({
       pendingApproval: false,
       affiliate,
@@ -505,22 +505,22 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
 router.get('/link', authenticate, async (req: Request, res) => {
   try {
     const userId = req.user!.userId;
-    
+
     const { rows: [affiliate] } = await db.query(
       'SELECT affiliate_code, is_active FROM affiliates WHERE user_id = $1',
       [userId]
     );
-    
+
     if (!affiliate) {
       return res.status(404).json({ error: 'Affiliate not found' });
     }
-    
+
     if (!affiliate.is_active) {
       return res.status(403).json({ error: 'Account pending approval' });
     }
-    
+
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliate.affiliate_code}`;
-    
+
     res.json({ affiliateLink });
   } catch (error) {
     console.error('Link error:', error);
@@ -535,22 +535,22 @@ router.get('/link', authenticate, async (req: Request, res) => {
 router.post('/connect/setup', authenticate, async (req: Request, res) => {
   try {
     const userId = req.user!.userId;
-    
+
     try {
       await checkAffiliateApproval(userId);
     } catch (error: any) {
       return res.status(403).json({ error: error.message });
     }
-    
+
     const { rows: [affiliate] } = await db.query(
       'SELECT id, email, full_name, stripe_account_id, stripe_account_status FROM affiliates WHERE user_id = $1',
       [userId]
     );
-    
+
     if (!affiliate) {
       return res.status(404).json({ error: 'Affiliate account not found' });
     }
-    
+
     let stripeAccountId = affiliate.stripe_account_id;
 
     if (!stripeAccountId) {
@@ -560,15 +560,15 @@ router.post('/connect/setup', authenticate, async (req: Request, res) => {
       }
       const account = await createConnectAccount(affiliate.id, affiliate.email, affiliate.full_name, country as AffiliateCountry);
       stripeAccountId = account.id;
-      
+
       await db.query(
         'UPDATE affiliates SET stripe_account_id = $1 WHERE id = $2',
         [stripeAccountId, affiliate.id]
       );
     }
-    
+
     const accountLink = await createAccountOnboardingLink(stripeAccountId);
-    
+
     res.json({
       success: true,
       url: accountLink.url,
@@ -583,22 +583,22 @@ router.post('/connect/setup', authenticate, async (req: Request, res) => {
 router.get('/connect/status', authenticate, async (req: Request, res) => {
   try {
     const userId = req.user!.userId;
-    
+
     try {
       await checkAffiliateApproval(userId);
     } catch (error: any) {
       return res.status(403).json({ error: error.message });
     }
-    
+
     const { rows: [affiliate] } = await db.query(
       'SELECT stripe_account_id, stripe_account_status, auto_payout_enabled FROM affiliates WHERE user_id = $1',
       [userId]
     );
-    
+
     if (!affiliate || !affiliate.stripe_account_id) {
       return res.json({ hasAccount: false, status: null });
     }
-    
+
     const status = await getAccountStatus(affiliate.stripe_account_id);
 
     // Sync from Stripe directly: account.updated events for connected accounts arrive on a
@@ -640,24 +640,24 @@ router.get('/connect/status', authenticate, async (req: Request, res) => {
 router.post('/connect/login', authenticate, async (req: Request, res) => {
   try {
     const userId = req.user!.userId;
-    
+
     try {
       await checkAffiliateApproval(userId);
     } catch (error: any) {
       return res.status(403).json({ error: error.message });
     }
-    
+
     const { rows: [affiliate] } = await db.query(
       'SELECT stripe_account_id FROM affiliates WHERE user_id = $1',
       [userId]
     );
-    
+
     if (!affiliate?.stripe_account_id) {
       return res.status(404).json({ error: 'No Stripe account found' });
     }
-    
+
     const loginLink = await createAccountLoginLink(affiliate.stripe_account_id);
-    
+
     res.json({ url: loginLink.url });
   } catch (error) {
     console.error('Connect login error:', error);
@@ -669,27 +669,27 @@ router.post('/connect/auto-payout', authenticate, async (req: Request, res) => {
   try {
     const userId = req.user!.userId;
     const { enabled } = req.body;
-    
+
     try {
       await checkAffiliateApproval(userId);
     } catch (error: any) {
       return res.status(403).json({ error: error.message });
     }
-    
+
     const { rows: [affiliate] } = await db.query(
       'SELECT stripe_account_id FROM affiliates WHERE user_id = $1',
       [userId]
     );
-    
+
     if (!affiliate?.stripe_account_id) {
       return res.status(404).json({ error: 'No Stripe account found' });
     }
-    
+
     await db.query(
       'UPDATE affiliates SET auto_payout_enabled = $1 WHERE user_id = $2',
       [enabled, userId]
     );
-    
+
     res.json({ success: true, auto_payout_enabled: enabled });
   } catch (error) {
     console.error('Toggle auto-payout error:', error);
@@ -708,7 +708,7 @@ router.get('/admin/list', authenticate, async (req: Request, res) => {
     }
 
     const { rows } = await db.query(
-      `SELECT a.*, 
+      `SELECT a.*,
               COUNT(ar.id) as total_referrals,
               SUM(CASE WHEN ar.status = 'converted' THEN 1 ELSE 0 END) as total_converted
        FROM affiliates a
@@ -736,7 +736,7 @@ router.get('/admin/pending', authenticate, async (req: Request, res) => {
     }
 
     const { rows } = await db.query(
-      `SELECT a.id, a.full_name, a.email, a.company_name, a.affiliate_code, 
+      `SELECT a.id, a.full_name, a.email, a.company_name, a.affiliate_code,
               a.created_at, a.tier, a.commission_rate, a.payout_email, a.payout_method,
               a.total_clicks, a.total_signups
        FROM affiliates a
@@ -779,17 +779,19 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
     }
 
     await db.query(
-      `UPDATE affiliates 
-       SET is_active = true, 
+      `UPDATE affiliates
+       SET is_active = true,
            approved_at = NOW(),
-           commission_rate = COALESCE($1, 15),
+           commission_rate = COALESCE($1, 20),
            tier = COALESCE($2, 'standard')
        WHERE id = $3`,
-      [commissionRate || 15, tier || 'standard', id]
+      [commissionRate || 20, tier || 'standard', id]
     );
+    // Rates come from the program tiers (20/25/30% by monthly conversions), not a fixed number.
+    await updateAffiliateTierColumn(Number(id));
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: 'Affiliate approved successfully'
     });
   } catch (error) {
@@ -816,16 +818,16 @@ router.delete('/admin/:id/reject', authenticate, async (req: Request, res) => {
     }
 
     await db.query(
-      `UPDATE affiliates SET 
-         deleted_at = NOW(), 
+      `UPDATE affiliates SET
+         deleted_at = NOW(),
          is_active = false
        WHERE id = $1`,
       [id]
     );
 
-    res.json({ 
-      success: true, 
-      message: 'Affiliate rejected' 
+    res.json({
+      success: true,
+      message: 'Affiliate rejected'
     });
   } catch (error) {
     console.error('Reject error:', error);
@@ -876,26 +878,42 @@ router.post('/admin/:id/payout', authenticate, async (req: Request, res) => {
       return res.json({ message: 'No pending commissions to mark as paid' });
     }
 
-    const totalAmount = pendingCommissions.rows.reduce((sum, c) => sum + parseFloat(c.amount), 0);
+    const totalAmount = Math.round(pendingCommissions.rows.reduce((sum, c) => sum + parseFloat(c.amount), 0) * 100) / 100;
     const ids = pendingCommissions.rows.map(c => c.id);
 
-    await db.query(
-      `UPDATE affiliate_commissions
-       SET status = 'paid', paid_at = NOW()
-       WHERE id = ANY($1::int[]) AND status = 'pending'`,
-      [ids]
-    );
+    // Paid outside Stripe (e.g. e-transfer): mark the commissions, move the balance and keep a
+    // payout record, all or nothing.
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(
+        `UPDATE affiliate_commissions
+         SET status = 'paid', paid_at = NOW()
+         WHERE id = ANY($1::int[]) AND status = 'pending'`,
+        [ids]
+      );
+      await client.query(
+        `UPDATE affiliates
+         SET pending_earnings = pending_earnings - $1,
+             paid_earnings = paid_earnings + $1
+         WHERE id = $2`,
+        [totalAmount, id]
+      );
+      await client.query(
+        `INSERT INTO payout_logs (affiliate_id, amount, status, stripe_transfer_id, error_message, processed_at)
+         VALUES ($1, $2, 'success', $3, 'Marked paid manually by admin', NOW())`,
+        [id, totalAmount, `manual-${id}-${Date.now()}`]
+      );
+      await client.query('COMMIT');
+    } catch (txError) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw txError;
+    } finally {
+      client.release();
+    }
 
-    await db.query(
-      `UPDATE affiliates
-       SET pending_earnings = pending_earnings - $1,
-           paid_earnings = paid_earnings + $1
-       WHERE id = $2`,
-      [totalAmount, id]
-    );
-
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Marked ${pendingCommissions.rows.length} commissions as paid for $${totalAmount.toFixed(2)}`
     });
   } catch (error) {
@@ -910,21 +928,21 @@ router.post('/admin/recalculate-tiers', authenticate, async (req: Request, res) 
     if (!req.user?.isAdmin) {
       return res.status(403).json({ error: 'Admin access required' });
     }
-    
+
     const { rows: affiliates } = await db.query(
       'SELECT id FROM affiliates'
     );
-    
+
     let updated = 0;
     for (const affiliate of affiliates) {
       await updateAffiliateTierColumn(affiliate.id);
       updated++;
     }
-    
-    res.json({ 
-      success: true, 
+
+    res.json({
+      success: true,
       message: `Recalculated tiers for ${updated} affiliates`,
-      totalAffiliates: affiliates.length 
+      totalAffiliates: affiliates.length
     });
   } catch (error) {
     console.error('Recalculate tiers error:', error);

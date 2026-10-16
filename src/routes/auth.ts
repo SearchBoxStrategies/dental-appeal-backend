@@ -47,12 +47,6 @@ router.post('/register', async (req, res) => {
         );
         if (affiliate) {
           referredByAffiliateId = affiliate.id;
-          await client.query(
-            `UPDATE affiliate_referrals
-             SET signed_up_at = NOW(), status = 'signed_up'
-             WHERE referral_code = $1 AND signed_up_at IS NULL`,
-            [referralCode]
-          );
         }
       }
 
@@ -73,6 +67,29 @@ router.post('/register', async (req, res) => {
         practiceId = practice.id;
 
         if (referredByAffiliateId) {
+          // Give this clinic its own referral record: the latest unclaimed click for the code, or
+          // a new record when no click was tracked (link forwarded, code typed in, tracking
+          // blocked). The commission later follows the clinic, not the click.
+          const { rows: [click] } = await client.query(
+            `SELECT id FROM affiliate_referrals
+             WHERE referral_code = $1 AND practice_id IS NULL AND signed_up_at IS NULL
+             ORDER BY clicked_at DESC NULLS LAST
+             LIMIT 1
+             FOR UPDATE SKIP LOCKED`,
+            [referralCode]
+          );
+          if (click) {
+            await client.query(
+              `UPDATE affiliate_referrals SET practice_id = $1, signed_up_at = NOW(), status = 'signed_up' WHERE id = $2`,
+              [practiceId, click.id]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO affiliate_referrals (affiliate_id, referral_code, practice_id, status, clicked_at, signed_up_at)
+               VALUES ($1, $2, $3, 'signed_up', NULL, NOW())`,
+              [referredByAffiliateId, referralCode, practiceId]
+            );
+          }
           await client.query(
             'UPDATE affiliates SET total_signups = total_signups + 1 WHERE id = $1',
             [referredByAffiliateId]

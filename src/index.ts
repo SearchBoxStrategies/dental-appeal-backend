@@ -26,6 +26,7 @@ import teamRouter from './routes/team';
 import { checkStorage } from './services/fileStorage';
 import { scheduleAppealReminders } from './jobs/appealReminders';
 import { scheduleHeartbeat, touchHeartbeat } from './jobs/heartbeat';
+import { schedulePayouts } from './jobs/autoPayout';
 import {
   apiLimiter, authLimiter, loginPerAccountLimiter, twoFactorLimiter,
   emailFormLimiter, emailRecipientLimiter, trackLimiter, rateLimit,
@@ -109,4 +110,5 @@ app.listen(PORT, () => {
   console.log(`📍 Health check: http://localhost:${PORT}/api/health`);
   scheduleAppealReminders();
   scheduleHeartbeat();
+  schedulePayouts();
 });
