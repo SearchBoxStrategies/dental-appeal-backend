@@ -81,7 +81,7 @@ export async function getAccountStatus(accountId: string) {
       charges_enabled: account.charges_enabled,
       payouts_enabled: account.payouts_enabled,
       details_submitted: account.details_submitted,
-      status: account.charges_enabled && account.payouts_enabled ? 'active' : 'pending',
+      status: account.payouts_enabled && account.details_submitted ? 'active' : 'pending',
     };
   } catch (error) {
     console.error('Error getting account status:', error);

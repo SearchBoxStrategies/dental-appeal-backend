@@ -354,6 +354,23 @@ async function updatePracticeStatus(customerId: string, status: string, subscrip
   }
 }
 
+async function refetchInPinnedVersion(event: Stripe.Event) {
+  const obj = event.data.object as { id?: string; object?: string };
+  if (!obj?.id) return;
+  let fresh: unknown;
+  try {
+    if (obj.object === 'invoice') fresh = await stripe.invoices.retrieve(obj.id);
+    else if (obj.object === 'charge') fresh = await stripe.charges.retrieve(obj.id);
+    else if (obj.object === 'subscription') fresh = await stripe.subscriptions.retrieve(obj.id);
+    else return;
+  } catch (err: any) {
+    // Object unknown to this account's API (e.g. a test event): fall back to the payload.
+    if (err?.statusCode === 404) return;
+    throw err;
+  }
+  (event.data as { object: unknown }).object = fresh;
+}
+
 router.post('/', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
   const sig = req.headers['stripe-signature'] as string;
   // Stripe signs events from our own account and events from connected (affiliate) accounts
@@ -384,6 +401,17 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
   }
 
   console.log(`📨 Received webhook event: ${event.type}`);
+
+  // Stripe sends events in the webhook destination's API version, and newer versions moved fields
+  // this handler reads (invoice.subscription, charge.invoice). Re-read payment objects through the
+  // API, which is pinned to the version this code is written for (see stripeOptions).
+  try {
+    await refetchInPinnedVersion(event);
+  } catch (err: any) {
+    console.error(`❌ Could not re-read ${event.type} object from Stripe: ${err.message}`);
+    // Ask Stripe to retry later rather than act on a payload in an unexpected shape.
+    return res.status(500).json({ error: 'Temporary error, please retry' });
+  }
 
   switch (event.type) {
     case 'checkout.session.completed': {
@@ -545,7 +573,9 @@ router.post('/', express.raw({ type: 'application/json' }), async (req: Request,
 
       if (affiliateId) {
         const { db } = await import('../db');
-        const isActive = account.charges_enabled && account.payouts_enabled;
+        // Affiliates only receive transfers: cross-border "recipient" accounts never get
+        // charges_enabled, so payouts plus submitted details is what counts.
+        const isActive = !!(account.payouts_enabled && account.details_submitted);
 
         await db.query(
           `UPDATE affiliates
