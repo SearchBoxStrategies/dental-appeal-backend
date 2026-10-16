@@ -356,19 +356,30 @@ async function updatePracticeStatus(customerId: string, status: string, subscrip
 
 router.post('/', express.raw({ type: 'application/json' }), async (req: Request, res: Response) => {
   const sig = req.headers['stripe-signature'] as string;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+  // Stripe signs events from our own account and events from connected (affiliate) accounts
+  // with different secrets, one per webhook destination. Accept either.
+  const webhookSecrets = [process.env.STRIPE_WEBHOOK_SECRET, process.env.STRIPE_CONNECT_WEBHOOK_SECRET]
+    .filter((s): s is string => !!s);
 
-  if (!webhookSecret) {
+  if (webhookSecrets.length === 0) {
     console.error('❌ STRIPE_WEBHOOK_SECRET is not set');
     return res.status(500).json({ error: 'Webhook secret not configured' });
   }
 
-  let event: Stripe.Event;
+  let event: Stripe.Event | undefined;
+  let lastError: any;
 
-  try {
-    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-  } catch (err: any) {
-    console.error(`⚠️ Webhook signature verification failed: ${err.message}`);
+  for (const secret of webhookSecrets) {
+    try {
+      event = stripe.webhooks.constructEvent(req.body, sig, secret);
+      break;
+    } catch (err: any) {
+      lastError = err;
+    }
+  }
+
+  if (!event) {
+    console.error(`⚠️ Webhook signature verification failed: ${lastError?.message}`);
     return res.status(401).json({ error: 'Webhook signature verification failed' });
   }
 
