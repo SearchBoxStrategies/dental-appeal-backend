@@ -1134,49 +1134,62 @@ router.delete('/affiliates/:id', authenticate, requireAdmin, async (req, res) =>
 // Restore a soft-deleted affiliate (admin only)
 router.post('/affiliates/:id/restore', authenticate, requireAdmin, async (req, res) => {
   const affiliateId = req.params.id;
-  
+  const client = await db.connect();
+
   try {
     // Check if affiliate exists and is deleted
-    const { rows: [affiliate] } = await db.query(
-      'SELECT id, email, full_name FROM affiliates WHERE id = $1 AND deleted_at IS NOT NULL',
+    const { rows: [affiliate] } = await client.query(
+      'SELECT id, email, full_name, user_id FROM affiliates WHERE id = $1 AND deleted_at IS NOT NULL',
       [affiliateId]
     );
-    
+
     if (!affiliate) {
       return res.status(404).json({ error: 'Affiliate not found or not deleted' });
     }
-    
-    // Start transaction
-    await db.query('BEGIN');
-    
-    // Restore the affiliate
-    await db.query(
-      'UPDATE affiliates SET deleted_at = NULL WHERE id = $1',
-      [affiliateId]
+
+    // The same person may have applied again after this account was deleted.
+    const { rows: [current] } = await client.query(
+      'SELECT id FROM affiliates WHERE lower(email) = lower($1) AND deleted_at IS NULL',
+      [affiliate.email]
     );
-    
+    if (current) {
+      return res.status(409).json({ error: `${affiliate.email} already has an active affiliate account (#${current.id}). Remove that one first if you want to restore this one.` });
+    }
+
+    await client.query('BEGIN');
+
+    // Restore the affiliate, re-attaching the login if a later application had taken it over.
+    await client.query(
+      `UPDATE affiliates SET deleted_at = NULL,
+         user_id = COALESCE(user_id, (SELECT id FROM users WHERE lower(email) = lower($2) LIMIT 1))
+       WHERE id = $1`,
+      [affiliateId, affiliate.email]
+    );
+
     // Restore associated referrals (optional)
-    await db.query(
+    await client.query(
       'UPDATE affiliate_referrals SET deleted_at = NULL WHERE affiliate_id = $1 AND deleted_at IS NOT NULL',
       [affiliateId]
     );
-    
+
     // Restore associated commissions (optional)
-    await db.query(
+    await client.query(
       'UPDATE affiliate_commissions SET deleted_at = NULL WHERE referral_id IN (SELECT id FROM affiliate_referrals WHERE affiliate_id = $1) AND deleted_at IS NOT NULL',
       [affiliateId]
     );
-    
-    await db.query('COMMIT');
-    
-    res.json({ 
-      success: true, 
-      message: `Affiliate ${affiliate.full_name} has been restored successfully.` 
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: `Affiliate ${affiliate.full_name} has been restored successfully.`
     });
   } catch (error) {
-    await db.query('ROLLBACK');
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Restore affiliate error:', error);
     res.status(500).json({ error: 'Failed to restore affiliate' });
+  } finally {
+    client.release();
   }
 });
 

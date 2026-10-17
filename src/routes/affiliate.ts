@@ -49,101 +49,108 @@ router.post('/signup', async (req, res) => {
   // Default to 'stripe' if no payout method provided
   const payoutMethodValue = payoutMethod || 'stripe';
 
+  const client = await db.connect();
+  let verification: { link: string } | null = null;
+  let affiliateCode: string;
   try {
+    await client.query('BEGIN');
+
     // Check if user already exists in users table
-    const existingUser = await db.query(
-      'SELECT id, email, user_type, email_verified FROM users WHERE email = $1',
+    const { rows: [existingUser] } = await client.query(
+      'SELECT id, email, user_type, email_verified FROM users WHERE lower(email) = lower($1) FOR UPDATE',
       [email]
     );
 
     let userId: number;
 
-    if (existingUser.rows.length > 0) {
-      // User exists - check if they're already an affiliate
-      const existingAffiliate = await db.query(
-        'SELECT id, affiliate_code, is_active FROM affiliates WHERE user_id = $1',
-        [existingUser.rows[0].id]
+    if (existingUser) {
+      // Already an affiliate? Deleted or rejected applications don't count: the person may apply again.
+      const { rows: [existingAffiliate] } = await client.query(
+        'SELECT id, affiliate_code, is_active FROM affiliates WHERE user_id = $1 AND deleted_at IS NULL',
+        [existingUser.id]
       );
 
-      if (existingAffiliate.rows.length > 0) {
-        const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existingAffiliate.rows[0].affiliate_code}`;
-
-        if (!existingAffiliate.rows[0].is_active) {
-          return res.json({
-            success: true,
-            alreadyExists: true,
-            pendingApproval: true,
-            affiliateCode: existingAffiliate.rows[0].affiliate_code,
-            affiliateLink,
-            message: 'You are already registered but your account is pending admin approval.'
-          });
-        }
-
+      if (existingAffiliate) {
+        await client.query('ROLLBACK');
+        const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existingAffiliate.affiliate_code}`;
         return res.json({
           success: true,
           alreadyExists: true,
-          pendingApproval: false,
-          affiliateCode: existingAffiliate.rows[0].affiliate_code,
+          pendingApproval: !existingAffiliate.is_active,
+          affiliateCode: existingAffiliate.affiliate_code,
           affiliateLink,
-          message: 'You are already registered as an affiliate!'
+          message: existingAffiliate.is_active
+            ? 'You are already registered as an affiliate!'
+            : 'You are already registered but your account is pending admin approval.'
         });
       }
 
-      userId = existingUser.rows[0].id;
+      userId = existingUser.id;
+
+      // An old deleted application keeps its history but no longer belongs to this login, so every
+      // "affiliate for this user" lookup finds only the new application.
+      await client.query(
+        'UPDATE affiliates SET user_id = NULL WHERE user_id = $1 AND deleted_at IS NOT NULL',
+        [userId]
+      );
+
+      // Never verified (e.g. an earlier attempt that failed): send a fresh link.
+      if (existingUser.user_type === 'affiliate' && !existingUser.email_verified) {
+        const verificationToken = crypto.randomBytes(32).toString('hex');
+        await client.query(
+          `UPDATE users SET verification_token = $1, verification_token_expires = NOW() + INTERVAL '24 hours' WHERE id = $2`,
+          [verificationToken, userId]
+        );
+        verification = { link: `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}` };
+      }
     } else {
       // Create new user (no password - they'll set it via email verification)
       const verificationToken = crypto.randomBytes(32).toString('hex');
       const tokenExpiry = new Date();
       tokenExpiry.setHours(tokenExpiry.getHours() + 24);
 
-      const userResult = await db.query(
+      const userResult = await client.query(
         `INSERT INTO users (email, name, user_type, is_admin, verification_token, verification_token_expires, email_verified, created_at)
          VALUES ($1, $2, 'affiliate', false, $3, $4, false, NOW())
          RETURNING id`,
         [email, fullName, verificationToken, tokenExpiry]
       );
       userId = userResult.rows[0].id;
-
-      // Send verification email
-      const verificationLink = `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}`;
-      console.log(`📧 Attempting to send verification email to ${email}`);
-      console.log(`🔗 Verification link: ${verificationLink}`);
-      console.log(`📧 SMTP_PASS: ${process.env.SMTP_PASS ? 'SET' : 'NOT SET'}`);
-      try {
-        await sendAffiliateVerificationEmail(email, fullName, verificationLink);
-        console.log(`✅ Verification email sent to ${email}`);
-      } catch (error) {
-        console.error(`❌ Failed to send verification email to ${email}:`, error);
-      }
-    }
-
-    // Check if affiliate already exists for this user
-    const existingAffiliate = await db.query(
-      'SELECT id, affiliate_code FROM affiliates WHERE user_id = $1',
-      [userId]
-    );
-
-    if (existingAffiliate.rows.length > 0) {
-      const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${existingAffiliate.rows[0].affiliate_code}`;
-      return res.json({
-        success: true,
-        alreadyExists: true,
-        affiliateCode: existingAffiliate.rows[0].affiliate_code,
-        affiliateLink,
-        message: 'Affiliate account already exists.'
-      });
+      verification = { link: `${process.env.FRONTEND_URL}/affiliate/verify?token=${verificationToken}` };
     }
 
     // Create new affiliate record
-    const affiliateCode = generateAffiliateCode(email);
+    affiliateCode = generateAffiliateCode(email);
 
-    const result = await db.query(
+    await client.query(
       `INSERT INTO affiliates (user_id, full_name, email, company_name, affiliate_code, payout_email, payout_method, is_active, approved_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)
-       RETURNING id, affiliate_code`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8)`,
       [userId, fullName, email, companyName || null, affiliateCode, payoutEmail || null, payoutMethodValue, null]
     );
 
+    await client.query('COMMIT');
+  } catch (error: any) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error?.code === '23505') {
+      return res.status(409).json({ error: 'An affiliate application with this email already exists. Please sign in or contact support.' });
+    }
+    console.error('Affiliate signup error:', error);
+    return res.status(500).json({ error: 'Failed to register affiliate' });
+  } finally {
+    client.release();
+  }
+
+  // Email only after the application is saved, so a failed sign-up never sends a dead link.
+  if (verification) {
+    try {
+      await sendAffiliateVerificationEmail(email, fullName, verification.link);
+      console.log(`✅ Verification email sent to ${email}`);
+    } catch (error) {
+      console.error(`❌ Failed to send verification email to ${email}:`, error);
+    }
+  }
+
+  {
     const affiliateLink = `${process.env.FRONTEND_URL}/register?ref=${affiliateCode}`;
 
     res.json({
@@ -154,9 +161,6 @@ router.post('/signup', async (req, res) => {
       pendingApproval: true,
       requiresVerification: true
     });
-  } catch (error) {
-    console.error('Affiliate signup error:', error);
-    res.status(500).json({ error: 'Failed to register affiliate' });
   }
 });
 
