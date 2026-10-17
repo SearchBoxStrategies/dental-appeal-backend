@@ -27,10 +27,13 @@ export async function createConnectAccount(affiliateId: number, email: string, f
       capabilities: {
         transfers: { requested: true },
       },
+      // Pre-answers Stripe's "industry" question. No website: Stripe means the affiliate's own
+      // site, which most don't have, and our app's address would misrepresent them; the
+      // description is accepted instead.
       business_profile: {
         name: 'DentalAppeal Affiliate',
-        url: process.env.FRONTEND_URL || 'https://app.dentalappeal.claims',
-        product_description: 'Affiliate marketing for dental appeal software',
+        mcc: '7311', // Advertising services
+        product_description: 'Refers dental clinics to DentalAppeal, an insurance-appeal software subscription, and earns a referral commission on their payments.',
       },
       metadata: {
         affiliateId: affiliateId.toString(),
