@@ -329,7 +329,8 @@ router.get('/track/:code', async (req, res) => {
       });
     }
 
-    res.redirect(`${process.env.FRONTEND_URL}/register?ref=${code}`);
+    // counted=1: the click is already recorded, so the app only remembers the code.
+    res.redirect(`${process.env.FRONTEND_URL}/register?ref=${encodeURIComponent(code)}&counted=1`);
   } catch (error) {
     console.error('Track error:', error);
     res.redirect(`${process.env.FRONTEND_URL}/register`);
