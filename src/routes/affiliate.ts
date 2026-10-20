@@ -408,7 +408,7 @@ router.get('/public-stats/:code', async (req, res) => {
         clicks: affiliate.total_clicks || 0,
         signups: affiliate.total_signups || 0,
         conversions: affiliate.total_conversions || 0,
-        commissionRate: affiliate.commission_rate || 20,
+        commissionRate: affiliate.commission_rate || 25,
         tier: affiliate.tier || 'standard',
         estimatedEarnings: Math.round(estimatedEarnings),
         joinLink: `${process.env.FRONTEND_URL}/register?ref=${affiliate.affiliate_code}`
@@ -459,7 +459,8 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
 
     const { rows: referrals } = await db.query(
       `SELECT ar.id, ar.referral_code, ar.status, ar.clicked_at, ar.signed_up_at, ar.converted_at,
-              ar.practice_id, p.name AS practice_name, p.subscription_status
+              ar.practice_id, p.name AS practice_name, p.subscription_status,
+              (SELECT MAX(c.created_at) FROM claims c WHERE c.practice_id = p.id) AS last_claim_at
        FROM affiliate_referrals ar
        LEFT JOIN practices p ON p.id = ar.practice_id
        WHERE ar.affiliate_id = $1
@@ -469,7 +470,7 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
     );
 
     const { rows: commissions } = await db.query(
-      `SELECT ac.id, ac.amount, ac.period_start, ac.period_end, ac.status, ac.paid_at, ac.created_at,
+      `SELECT ac.id, ac.amount, ac.period_start, ac.period_end, ac.status, ac.paid_at, ac.created_at, ac.kind,
               p.name as practice_name
        FROM affiliate_commissions ac
        JOIN affiliate_referrals ar ON ac.referral_id = ar.id
@@ -493,10 +494,28 @@ router.get('/dashboard', authenticate, async (req: Request, res) => {
       [affiliate.id]
     );
 
+    // Flag paying clinics that may need a call: a failed payment, or no claims lately.
+    // Only recency is shown, never claim or patient details.
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const referralsWithRisk = referrals.map((r: any) => {
+      let atRisk: 'payment_failed' | 'inactive' | null = null;
+      if (r.converted_at) {
+        if (r.subscription_status === 'past_due' || r.subscription_status === 'unpaid') {
+          atRisk = 'payment_failed';
+        } else if (r.subscription_status === 'active') {
+          const since = r.last_claim_at ? new Date(r.last_claim_at).getTime() : new Date(r.converted_at).getTime();
+          const limit = r.last_claim_at ? 30 : 14;
+          if (Date.now() - since > limit * DAY_MS) atRisk = 'inactive';
+        }
+      }
+      const { last_claim_at, ...rest } = r;
+      return { ...rest, at_risk: atRisk };
+    });
+
     res.json({
       pendingApproval: false,
       affiliate,
-      referrals,
+      referrals: referralsWithRisk,
       commissions,
       monthlyEarnings,
       nextTier
@@ -787,12 +806,12 @@ router.put('/admin/:id/approve', authenticate, async (req: Request, res) => {
       `UPDATE affiliates
        SET is_active = true,
            approved_at = NOW(),
-           commission_rate = COALESCE($1, 20),
+           commission_rate = COALESCE($1, 25),
            tier = COALESCE($2, 'standard')
        WHERE id = $3`,
-      [commissionRate || 20, tier || 'standard', id]
+      [commissionRate || 25, tier || 'standard', id]
     );
-    // Rates come from the program tiers (20/25/30% by monthly conversions), not a fixed number.
+    // Rates come from the program tiers (25/30/35% by active paying clinics), not a fixed number.
     await updateAffiliateTierColumn(Number(id));
 
     res.json({

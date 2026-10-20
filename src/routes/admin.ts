@@ -1247,6 +1247,21 @@ router.post('/cron/payout', async (req, res) => {
 });
 
 // Same secret as the payout cron. The API also runs this itself every 6 hours.
+router.post('/cron/affiliate-bonuses', async (req, res) => {
+  const expectedSecret = process.env.CRON_SECRET_KEY;
+  if (!expectedSecret) return res.status(500).json({ error: 'Cron secret not configured' });
+  if (req.headers['x-cron-secret'] !== expectedSecret) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const { awardAffiliateBonuses, refreshAllTiers } = await import('../jobs/affiliateBonuses');
+    const result = await awardAffiliateBonuses();
+    await refreshAllTiers();
+    res.json({ success: true, ...result });
+  } catch (error) {
+    console.error('Cron affiliate bonuses error:', error);
+    res.status(500).json({ error: 'Affiliate bonuses failed' });
+  }
+});
+
 router.post('/cron/reminders', async (req, res) => {
   const expectedSecret = process.env.CRON_SECRET_KEY;
   if (!expectedSecret) return res.status(500).json({ error: 'Cron secret not configured' });

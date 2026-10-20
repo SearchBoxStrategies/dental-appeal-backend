@@ -109,8 +109,8 @@ async function createAffiliateCommission(practiceId: number, subscriptionId: str
     );
     await client.query('COMMIT');
 
-    // Tier is based on this month's conversions, including the one just recorded
-    const tier = await getAffiliateTier(practice.referred_by_affiliate_id);
+    // Tier is based on active paying clinics; this clinic is paying even if its status is not saved yet
+    const tier = await getAffiliateTier(practice.referred_by_affiliate_id, 1);
     const commissionAmount = roundCents((amount / 100) * (tier.rate / 100));
 
     await client.query('BEGIN');
@@ -152,7 +152,7 @@ async function createRecurringAffiliateCommission(practiceId: number, invoice: S
       return;
     }
 
-    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} conversions this month`);
+    console.log(`Practice ${practiceId} referred by affiliate ${tierInfo.affiliateId} in ${tierInfo.name} tier (${tierInfo.rate}%) with ${tierInfo.referralCount} active clinics`);
 
     const { rows: [referral] } = await client.query(
       `SELECT id FROM affiliate_referrals

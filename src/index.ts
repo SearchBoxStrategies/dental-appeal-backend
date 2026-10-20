@@ -27,6 +27,7 @@ import { checkStorage } from './services/fileStorage';
 import { scheduleAppealReminders } from './jobs/appealReminders';
 import { scheduleHeartbeat, touchHeartbeat } from './jobs/heartbeat';
 import { schedulePayouts } from './jobs/autoPayout';
+import { scheduleAffiliateBonuses } from './jobs/affiliateBonuses';
 import {
   apiLimiter, authLimiter, loginPerAccountLimiter, twoFactorLimiter,
   emailFormLimiter, emailRecipientLimiter, trackLimiter, rateLimit,
@@ -111,4 +112,5 @@ app.listen(PORT, () => {
   scheduleAppealReminders();
   scheduleHeartbeat();
   schedulePayouts();
+  scheduleAffiliateBonuses();
 });
