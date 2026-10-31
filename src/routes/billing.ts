@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db';
 import { authenticate, requireOwner } from '../middleware/auth';
+import { TRIAL_DAYS } from '../middleware/subscription';
 import { createCheckoutSession, createCustomerPortalSession } from '../services/stripe';
 
 const router = Router();
@@ -11,16 +12,28 @@ router.get('/subscription', authenticate, async (req, res) => {
     const practiceId = req.user!.practiceId;
 
     const { rows: [practice] } = await db.query(
-      `SELECT subscription_status, stripe_customer_id, total_paid, last_payment_date
+      `SELECT subscription_status, stripe_customer_id, total_paid, last_payment_date,
+              created_at + make_interval(days => $2) AS trial_ends_at
        FROM practices WHERE id = $1`,
-      [practiceId]
+      [practiceId, TRIAL_DAYS]
     );
+
+    // Only practices still on the free trial (never subscribed) get a countdown.
+    let trialDaysLeft: number | null = null;
+    let trialEndsAt: string | null = null;
+    if (practice?.subscription_status === 'trial' && practice.trial_ends_at) {
+      const ends = new Date(practice.trial_ends_at);
+      trialEndsAt = ends.toISOString();
+      trialDaysLeft = Math.max(0, Math.ceil((ends.getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+    }
 
     res.json({
       status: practice?.subscription_status || 'inactive',
       stripeCustomerId: practice?.stripe_customer_id,
       totalPaid: practice?.total_paid || 0,
       lastPaymentDate: practice?.last_payment_date,
+      trialDaysLeft,
+      trialEndsAt,
     });
   } catch (error) {
     console.error(error);

@@ -30,6 +30,18 @@ const escapeHtml = (value: unknown): string =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
+// Mail with only an HTML part scores worse with spam filters, so every email also carries a plain-text copy.
+const htmlToText = (html: string): string =>
+  html
+    .replace(/<(style|head|title)[\s\S]*?<\/\1>/gi, '')
+    .replace(/<a [^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, label) => `${label.replace(/<[^>]+>/g, '').trim()} (${href})`)
+    .replace(/<(br|\/p|\/div|\/h[1-6]|\/li|\/tr)\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n')
+    .trim();
+
 export const sendEmail = async (options: EmailOptions) => {
   console.log(`📧 sendEmail called for ${options.to}`);
   console.log(`📧 SMTP_PASS: ${process.env.SMTP_PASS ? 'SET' : 'NOT SET'}`);
@@ -43,7 +55,7 @@ export const sendEmail = async (options: EmailOptions) => {
       to: options.to,
       subject: options.subject,
       html: options.html,
-      text: options.text,
+      text: options.text ?? htmlToText(options.html),
     });
     console.log(`✅ Email sent to ${options.to} (Message ID: ${info.messageId})`);
     return true;

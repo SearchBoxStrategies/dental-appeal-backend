@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { db } from '../db';
 
 // New practices are created with status 'trial'; this is how long that lasts.
-const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS ?? '14', 10);
+export const TRIAL_DAYS = parseInt(process.env.TRIAL_DAYS ?? '14', 10);
 
 export async function requireActiveSubscription(
   req: Request,
