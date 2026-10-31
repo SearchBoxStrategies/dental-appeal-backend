@@ -247,7 +247,7 @@ export const sendPasswordResetEmail = async (email: string, token: string, name:
         <p>Hello ${escapeHtml(name)},</p>
         <p>We received a request to reset your password. Click the button below to create a new password.</p>
         <div style="text-align: center;">
-          <a href="${resetUrl}" class="button">Reset Password</a>
+          <a href="${resetUrl}" class="button" style="display: inline-block; background-color: #2563eb; color: #ffffff !important; padding: 12px 24px; text-decoration: none !important; border-radius: 6px; font-weight: 600; margin: 20px 0;"><span style="color: #ffffff;">Reset Password</span></a>
         </div>
         <p style="font-size: 12px; color: #666;">This link expires in 1 hour. If you didn't request this, ignore this email.</p>
         <div class="warning">

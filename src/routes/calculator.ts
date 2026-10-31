@@ -96,7 +96,7 @@ router.post('/calculator/send-report', async (req, res) => {
             </div>
 
             <div style="text-align: center;">
-              <a href="https://app.dentalappeal.claims/register" class="button">Start Your Free Trial →</a>
+              <a href="https://app.dentalappeal.claims/register" class="button" style="display: inline-block; background-color: #2563eb; color: #ffffff !important; padding: 12px 24px; text-decoration: none !important; border-radius: 6px; font-weight: 600; margin: 20px 0;"><span style="color: #ffffff;">Start Your Free Trial →</span></a>
             </div>
 
             <hr style="margin: 30px 0;" />
@@ -125,7 +125,7 @@ Sincerely,
 
             <p>Or, let DentalAppeal write it for you in 30 seconds.</p>
             <div style="text-align: center;">
-              <a href="https://app.dentalappeal.claims/register" class="button">Try DentalAppeal Free →</a>
+              <a href="https://app.dentalappeal.claims/register" class="button" style="display: inline-block; background-color: #2563eb; color: #ffffff !important; padding: 12px 24px; text-decoration: none !important; border-radius: 6px; font-weight: 600; margin: 20px 0;"><span style="color: #ffffff;">Try DentalAppeal Free →</span></a>
             </div>
           </div>
           <div class="footer">
