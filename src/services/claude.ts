@@ -8,8 +8,19 @@ const client = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
 // One model for letters, notes and reading denial notices. Override with CLAUDE_MODEL.
 const MODEL = process.env.CLAUDE_MODEL || 'claude-opus-5-5';
 
-// If the model declines a request, the API retries it on a fallback model in the same call.
+const flag = (name: string) => ['1', 'true', 'on', 'yes'].includes((process.env[name] || '').trim().toLowerCase());
+
+// Server-side fallbacks: when the model declines a request, the API retries it on another model in
+// the same call. OFF unless CLAUDE_FALLBACKS=on, so every request runs on the one named model above
+// (a fallback could land on a model with different data-retention terms). When off, a declined
+// request shows the clinic the usual "AI declined" message.
 const FALLBACK_BETA = 'server-side-fallback-2026-07-01';
+const useFallbacks = () => flag('CLAUDE_FALLBACKS');
+
+// Official code descriptions (licensed ADA CDT / CDA USC&LS text) are shown in the app but are NOT
+// put into AI requests unless SEND_CODE_DESCRIPTIONS_TO_AI=on. Off, the AI sees only the code
+// number and its coding system, and writes from the dentist's note.
+const sendCodeDescriptions = () => flag('SEND_CODE_DESCRIPTIONS_TO_AI');
 
 export class ClaudeError extends Error {}
 
@@ -33,13 +44,11 @@ async function callClaude({ system, content, maxTokens, effort, jsonSchema }: Ca
     system,
     messages: [{ role: 'user', content }],
     output_config: outputConfig,
-    fallbacks: 'default',
+    ...(useFallbacks() ? { fallbacks: 'default' } : {}),
   } as unknown as Anthropic.MessageCreateParamsNonStreaming;
 
   const started = Date.now();
-  const response = await client.messages.create(body, {
-    headers: { 'anthropic-beta': FALLBACK_BETA },
-  });
+  const response = await client.messages.create(body, useFallbacks() ? { headers: { 'anthropic-beta': FALLBACK_BETA } } : undefined);
   console.log(`✅ Claude ${response.model} replied in ${Date.now() - started}ms`);
 
   const stopReason = response.stop_reason as string;
@@ -109,11 +118,12 @@ export interface PracticeProfile {
   } | null;
 }
 
-// "D2740 — <description>" when the licensed code table has a description; otherwise the code
-// with its coding system, never a guess. No code descriptions are built into the app.
-const describeCodes = (codes: string[], descriptions: Record<string, string> = {}) =>
+// "D2740 — <description>" when the licensed code table has a description AND sending descriptions to
+// the AI is switched on; otherwise the code with its coding system, never a guess. No code
+// descriptions are built into the app.
+export const describeCodes = (codes: string[], descriptions: Record<string, string> = {}) =>
   codes.map((code) => {
-    const description = descriptions[code];
+    const description = sendCodeDescriptions() ? descriptions[code] : undefined;
     if (description) return `${code} — ${description}`;
     return `${code} (${codeSystem(code) === 'USCLS' ? 'Canadian USC&LS code' : 'US CDT code'})`;
   }).join('\n  ');
